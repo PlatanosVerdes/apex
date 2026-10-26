@@ -1,0 +1,78 @@
+package valhalla
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestDecode(t *testing.T) {
+	// Google's documented example, scaled: the same characters read with 6 decimals.
+	got := decode("_p~iF~ps|U_ulLnnqC_mqNvxq`@")
+	want := [][2]float64{{3.85, -12.02}, {4.07, -12.095}, {4.3252, -12.6453}}
+	if len(got) != len(want) {
+		t.Fatalf("%v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("point %d: got %v want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRouteChunksAndAvoids(t *testing.T) {
+	var sizes []int
+	var options []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Locations      []any                     `json:"locations"`
+			CostingOptions map[string]map[string]any `json:"costing_options"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sizes = append(sizes, len(body.Locations))
+		options = append(options, body.CostingOptions["motorcycle"])
+		legs := strings.TrimSuffix(strings.Repeat(`{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"},`, len(body.Locations)-1), ",")
+		fmt.Fprintf(w, `{"trip":{"summary":{"length":%d,"time":%d,"has_ferry":%v},"legs":[%s]}}`,
+			len(body.Locations)-1, 60*(len(body.Locations)-1), len(sizes) == 2, legs)
+	}))
+	defer srv.Close()
+
+	pts := make([]Point, 25)
+	for i := range pts {
+		pts[i] = Point{Lat: 39 + float64(i)/100, Lng: 2.6}
+	}
+	c := New(srv.URL, "test")
+	r, err := c.Route(context.Background(), pts, Options{Avoid: Avoid{Highways: true, Tolls: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(sizes) != "[10 10 7]" {
+		t.Errorf("chunks must share their ends to cover 25 points: %v", sizes)
+	}
+	if len(r.Legs) != 24 || r.Meters != 24000 || r.Seconds != 1440 || !r.Has.Ferries {
+		t.Errorf("%d legs, %v m, %v s, has %+v", len(r.Legs), r.Meters, r.Seconds, r.Has)
+	}
+	if o := options[0]; o["use_highways"] != 0.0 || o["use_tolls"] != 0.0 || o["use_ferry"] != nil {
+		t.Errorf("options %v", o)
+	}
+
+	if _, err := c.Route(context.Background(), pts, Options{Avoid: Avoid{Highways: true, Tolls: true}}); err != nil || len(sizes) != 3 {
+		t.Errorf("the same route again should come from the cache: %d requests, %v", len(sizes), err)
+	}
+}
+
+func TestRouteError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error_code":442,"error":"No path could be found for input"}`))
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL, "test").Route(context.Background(), []Point{{39.57, 2.65}, {38.9, 1.4}}, Options{})
+	if err == nil || !strings.Contains(err.Error(), "No path") {
+		t.Fatalf("got %v", err)
+	}
+}
