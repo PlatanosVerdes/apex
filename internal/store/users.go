@@ -74,6 +74,15 @@ func (d *UserData) SaveProfile(profile any) error {
 	return os.WriteFile(filepath.Join(d.dir, "profile.json"), data, 0o600)
 }
 
+// Exists reports whether the rider already has a folder, without creating one.
+func (u *Users) Exists(id string) bool {
+	if !validUserID.MatchString(id) {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(u.dir, id))
+	return err == nil
+}
+
 // Each calls fn with every rider who has a folder.
 func (u *Users) Each(fn func(*UserData)) error {
 	entries, err := os.ReadDir(u.dir)

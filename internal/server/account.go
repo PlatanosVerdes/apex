@@ -46,6 +46,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.Google.Finish(w, r)
 	if err != nil {
+		s.Metrics.Inc("apex_signins_total", "Sign-ins by outcome.", "outcome", "failed")
 		s.Log.Warn("sign in", "err", err)
 		http.Redirect(w, r, "/?signin=failed", http.StatusFound)
 		return
@@ -66,11 +67,17 @@ func (s *Server) devLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request, u auth.User) {
+	existed := s.Users.Exists(u.ID)
 	d, err := s.Users.For(u.ID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	outcome := "returning"
+	if !existed {
+		outcome = "new_account"
+	}
+	s.Metrics.Inc("apex_signins_total", "Sign-ins by outcome.", "outcome", outcome)
 	if err := d.SaveProfile(u); err != nil {
 		s.Log.Warn("profile", "err", err)
 	}
@@ -167,6 +174,7 @@ func sameOrigin(next http.Handler) http.Handler {
 func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.Public != nil && !s.Public.Take(s.clientIP(r)) {
+			s.Metrics.Inc("apex_rate_limited_total", "Requests refused for asking too often.")
 			w.Header().Set("Retry-After", "5")
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return

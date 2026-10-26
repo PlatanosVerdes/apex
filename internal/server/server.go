@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PlatanosVerdes/apex/internal/auth"
 	"github.com/PlatanosVerdes/apex/internal/limit"
+	"github.com/PlatanosVerdes/apex/internal/metrics"
 	"github.com/PlatanosVerdes/apex/internal/nominatim"
 	"github.com/PlatanosVerdes/apex/internal/photon"
 	"github.com/PlatanosVerdes/apex/internal/plan"
@@ -58,8 +60,10 @@ type Server struct {
 	// (CF-Connecting-IP behind Cloudflare). Empty means the TCP peer is the visitor.
 	ClientIPHeader string
 	Places         Places
-	Version        string
-	Log            *slog.Logger
+	// Metrics counts what happens; nil counts nothing.
+	Metrics *metrics.Registry
+	Version string
+	Log     *slog.Logger
 }
 
 func (s *Server) Handler() http.Handler {
@@ -98,10 +102,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/lists/{id}/refresh", s.signedIn(s.refreshList))
 	mux.HandleFunc("PATCH /api/lists/{id}", s.signedIn(s.setListColour))
 	mux.HandleFunc("DELETE /api/lists/{id}", s.signedIn(s.deleteList))
-	return secure(sameOrigin(mux))
+	return secure(sameOrigin(s.counted(mux)), s.Sessions.Secure)
 }
 
-func secure(next http.Handler) http.Handler {
+// secure sets the headers a public page is expected to send. With HTTPS on, a visit that came in over
+// plain HTTP (as the proxy reports it) is sent to HTTPS first: the session cookie only travels there.
+func secure(next http.Handler, httpsOnly bool) http.Handler {
 	csp := strings.Join([]string{
 		"default-src 'self'",
 		// Google serves the rider's account picture from here.
@@ -111,9 +117,17 @@ func secure(next http.Handler) http.Handler {
 		"base-uri 'self'",
 		"form-action 'none'",
 		"object-src 'none'",
+		"frame-ancestors 'none'",
 	}, "; ")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		if httpsOnly {
+			if r.Header.Get("X-Forwarded-Proto") == "http" {
+				http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
+				return
+			}
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Content-Type-Options", "nosniff")
 		// Tile servers refuse requests that carry no Referer.
@@ -161,9 +175,28 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 	var allow func() bool
 	user := s.rider(r)
 	if s.Curves != nil {
-		allow = func() bool { return s.Curves.Take(user) }
+		allow = func() bool {
+			ok := s.Curves.Take(user)
+			result := "spent"
+			if !ok {
+				result = "refused"
+			}
+			s.Metrics.Inc("apex_curve_searches_total", "Curve searches asked for, spent or refused for lack of budget.", "result", result)
+			return ok
+		}
 	}
+	mode := "simple"
+	if req.Legs != nil {
+		mode = "advanced"
+	}
+	started := time.Now()
 	result, err := s.Planner.Plan(r.Context(), pts, req.Legs, req.Avoid, allow)
+	s.Metrics.Observe("apex_plan_seconds", "Time taken to work a route out.", time.Since(started), "mode", mode)
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	s.Metrics.Inc("apex_plans_total", "Routes worked out, by mode and outcome.", "mode", mode, "outcome", outcome)
 	if err != nil {
 		s.Log.Warn("plan", "err", err, "points", len(pts))
 		http.Error(w, "no route: "+err.Error(), http.StatusBadGateway)

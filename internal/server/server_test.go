@@ -15,6 +15,7 @@ import (
 	"github.com/PlatanosVerdes/apex/internal/auth"
 	"github.com/PlatanosVerdes/apex/internal/gmaps"
 	"github.com/PlatanosVerdes/apex/internal/limit"
+	"github.com/PlatanosVerdes/apex/internal/metrics"
 	"github.com/PlatanosVerdes/apex/internal/nominatim"
 	"github.com/PlatanosVerdes/apex/internal/photon"
 	"github.com/PlatanosVerdes/apex/internal/plan"
@@ -331,5 +332,54 @@ func TestCurveBudgetPerRider(t *testing.T) {
 	}
 	if c := ask(b); c.Left != 1 {
 		t.Errorf("another rider has their own budget: %+v", c)
+	}
+}
+
+func TestHTTPSOnlyBehindAProxy(t *testing.T) {
+	srv, _, _ := newServerWith(t, func(s *Server) { s.Sessions.Secure = true })
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/r/41.6,2.2?n=x", nil)
+	req.Host = "apex.example"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	resp, _ := c.Do(req)
+	if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "https://apex.example/r/41.6,2.2?n=x" {
+		t.Errorf("plain http: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, _ = c.Do(req)
+	if resp.StatusCode != 200 || resp.Header.Get("Strict-Transport-Security") == "" ||
+		!strings.Contains(resp.Header.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Errorf("https: %d %v", resp.StatusCode, resp.Header)
+	}
+}
+
+func TestMetricsCountWithoutNaming(t *testing.T) {
+	reg := metrics.New()
+	srv, _, s := newServerWith(t, func(s *Server) { s.Metrics = reg; s.Curves = limit.New(1, time.Minute) })
+	s.Gauges()
+	a := rider(t, srv, "a")
+	do(t, a, http.MethodPost, srv.URL+"/api/routes", `{"name":"1"}`)
+	for range 2 {
+		do(t, a, http.MethodPost, srv.URL+"/api/plan", `{"points":[[39.57,2.65],[39.7,2.7]],"legs":[{"style":"curvy"}]}`)
+	}
+	do(t, http.DefaultClient, http.MethodGet, srv.URL+"/api/routes", "")
+	var b strings.Builder
+	reg.Write(&b)
+	out := b.String()
+	for _, want := range []string{
+		`apex_plans_total{mode="advanced",outcome="ok"} 2`,
+		`apex_curve_searches_total{result="spent"} 1`,
+		`apex_curve_searches_total{result="refused"} 1`,
+		`apex_http_requests_total{route="/api/routes",method="GET",code="4xx"} 1`,
+		"apex_accounts 1",
+		"apex_saved_routes 1",
+		`apex_riders{window="24h",kind="account"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "dev.local") || strings.Contains(out, "127.0.0.1") {
+		t.Error("metrics must not name riders")
 	}
 }

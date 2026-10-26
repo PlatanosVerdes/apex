@@ -61,6 +61,14 @@ cookie signed with HMAC-SHA256, `HttpOnly`, `Secure` over HTTPS, `SameSite=Lax`,
 Each rider has a folder named after a hash of their Google subject, holding at most 200 routes and
 10 lists. Changes from another site's page are refused.
 
+## Metrics
+
+`/metrics` on its own address (`APEX_METRICS_ADDR`), never the public one: requests by route and
+answer class, routes worked out by mode, curve searches spent and refused, sign-ins (new and
+returning accounts), riders in the last hour and day, rate-limited requests, and the time and outcome
+of every call to Valhalla, Photon, Nominatim and Google, plus accounts, saved routes and linked
+lists. Riders are counted, never named.
+
 ## Running it
 
 ```
@@ -79,4 +87,5 @@ go run ./cmd/apex
 | `APEX_CURVE_SEARCHES`, `APEX_CURVE_REFILL` | `20`, `30s` | each rider's curve-search budget |
 | `APEX_PUBLIC_REQUESTS`, `APEX_PUBLIC_REFILL` | `120`, `500ms` | each address's budget on the open endpoints |
 | `APEX_LISTS_EVERY` | `3h` | how often linked lists are read again |
+| `APEX_METRICS_ADDR` | | where `/metrics` is served for Prometheus, e.g. `:9100`; never the public address |
 | `APEX_VALHALLA_URL`, `APEX_NOMINATIM_URL`, `APEX_PHOTON_URL` | public servers | |

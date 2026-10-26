@@ -17,6 +17,7 @@ import (
 	"github.com/PlatanosVerdes/apex/internal/auth"
 	"github.com/PlatanosVerdes/apex/internal/gmaps"
 	"github.com/PlatanosVerdes/apex/internal/limit"
+	"github.com/PlatanosVerdes/apex/internal/metrics"
 	"github.com/PlatanosVerdes/apex/internal/nominatim"
 	"github.com/PlatanosVerdes/apex/internal/photon"
 	"github.com/PlatanosVerdes/apex/internal/plan"
@@ -44,6 +45,8 @@ func run() error {
 		publicURL    = env("APEX_PUBLIC_URL", "")
 		clientID     = env("APEX_GOOGLE_CLIENT_ID", "")
 		logAsJSON    = env("APEX_LOG_JSON", "") == "1"
+		// Never published to the tunnel: only Prometheus reads it.
+		metricsAddr = env("APEX_METRICS_ADDR", "")
 		// Both public servers ask for an agent that identifies the app.
 		userAgent = "apex/" + buildVersion + " (+https://github.com/PlatanosVerdes/apex)"
 	)
@@ -52,6 +55,9 @@ func run() error {
 	if logAsJSON {
 		log = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
+	reg := metrics.New()
+	// Every client Apex has uses the default transport, so this times every call to another server.
+	http.DefaultTransport = &server.Transport{Next: http.DefaultTransport, Metrics: reg}
 	users, err := store.OpenUsers(filepath.Join(dataDir, "users"))
 	if err != nil {
 		return err
@@ -84,6 +90,7 @@ func run() error {
 		// A curve search costs the public routing server five to ten requests; a fast leg costs one.
 		Curves:  limit.New(number("APEX_CURVE_SEARCHES", 20), duration("APEX_CURVE_REFILL", 30*time.Second)),
 		Places:  nominatim.New(nominatimURL, userAgent),
+		Metrics: reg,
 		Version: buildVersion,
 		Log:     log,
 	}
@@ -99,6 +106,10 @@ func run() error {
 	}()
 
 	go s.RefreshLists(ctx, duration("APEX_LISTS_EVERY", 3*time.Hour))
+	if metricsAddr != "" {
+		s.Gauges()
+		go serveMetrics(metricsAddr, reg, log)
+	}
 
 	log.Info("apex listening", "version", buildVersion, "port", port, "valhalla", routerURL,
 		"google", google != nil, "dev_login", s.DevLogin, "public_url", publicURL)
@@ -129,4 +140,16 @@ func duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func serveMetrics(addr string, reg *metrics.Registry, log *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		reg.Write(w)
+	})
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	if err := srv.ListenAndServe(); err != nil {
+		log.Warn("metrics stopped", "err", err)
+	}
 }
