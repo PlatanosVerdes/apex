@@ -111,8 +111,12 @@ func secure(next http.Handler, httpsOnly bool) http.Handler {
 	csp := strings.Join([]string{
 		"default-src 'self'",
 		// Google serves the rider's account picture from here.
-		"img-src 'self' data: https://server.arcgisonline.com https://lh3.googleusercontent.com",
-		"connect-src 'self'",
+		"img-src 'self' data: blob: https://server.arcgisonline.com https://lh3.googleusercontent.com",
+		// OpenFreeMap's styles, vector tiles, fonts and sprites, and Esri's satellite imagery: MapLibre
+		// fetches them all from a worker.
+		"connect-src 'self' https://tiles.openfreemap.org https://server.arcgisonline.com",
+		"worker-src blob:",
+		"child-src blob:",
 		// 'self' for the <base> that keeps relative URLs working under /r/....
 		"base-uri 'self'",
 		"form-action 'none'",

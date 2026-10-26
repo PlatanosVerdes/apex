@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 const L = window.L;
 
 const point = ({ lat, lng }) => ({ lat, lng });
@@ -6,19 +7,44 @@ const BASE_KEY = 'apex.base';
 const esri = path => `https://server.arcgisonline.com/ArcGIS/rest/services/${path}/MapServer/tile/{z}/{y}/{x}`;
 const esriCredit = 'Tiles &copy; Esri';
 
+const OPENFREEMAP = 'https://tiles.openfreemap.org/styles/liberty';
+const OPENFREEMAP_CREDIT = '<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+
+// The road map is OpenFreeMap's Liberty style (free, no key), drawn by MapLibre in vector.
+function roadLayer() {
+  return L.maplibreGL({ style: OPENFREEMAP, attribution: OPENFREEMAP_CREDIT });
+}
+
+// Satellite is Esri's imagery under Liberty's own roads and names, as Google Maps does it: the
+// style's fills and background give way to the photo, its lines and labels stay.
+function satelliteLayer() {
+  const layer = L.maplibreGL({ style: OPENFREEMAP, attribution: `${esriCredit}, Maxar, Earthstar Geographics, ${OPENFREEMAP_CREDIT}` });
+  layer.on('add', () => {
+    const m = layer.getMaplibreMap();
+    const swap = () => {
+      if (m.getSource('satellite')) return;
+      for (const l of m.getStyle().layers) {
+        if (!['line', 'symbol'].includes(l.type) || l.id.startsWith('waterway')) m.removeLayer(l.id);
+      }
+      m.addSource('satellite', { type: 'raster', tiles: [esri('World_Imagery')], tileSize: 256, maxzoom: 19 });
+      m.addLayer({ id: 'satellite', type: 'raster', source: 'satellite' }, m.getStyle().layers[0]?.id);
+    };
+    if (m.isStyleLoaded()) swap();
+    else m.once('style.load', swap);
+  });
+  return layer;
+}
+
 function baseLayers() {
   return {
-    Roads: L.tileLayer(esri('World_Street_Map'), { maxZoom: 19, attribution: `${esriCredit}, HERE, Garmin, &copy; OpenStreetMap` }),
-    Satellite: L.layerGroup([
-      L.tileLayer(esri('World_Imagery'), { maxZoom: 19, attribution: `${esriCredit}, Maxar, Earthstar Geographics` }),
-      L.tileLayer(esri('Reference/World_Transportation'), { maxZoom: 19 }),
-    ]),
+    Roads: roadLayer(),
+    Satellite: satelliteLayer(),
   };
 }
 
 // One tile per base map (zoom 11 over the Llobregat valley) shown as its thumbnail in the picker.
 export const BASE_PREVIEWS = {
-  Roads: esri('World_Street_Map').replace('{z}/{y}/{x}', '11/763/1035'),
+  Roads: 'preview-map.png',
   Satellite: esri('World_Imagery').replace('{z}/{y}/{x}', '11/763/1035'),
 };
 
@@ -76,6 +102,7 @@ export class RouteMap {
       return marker.addTo(this.pins);
     });
   }
+
 
   setBase(name) {
     if (!(name in this.bases) || name === this.base) return;
@@ -263,7 +290,7 @@ function placeCard(place, listName, onAdd) {
   }
   const add = document.createElement('button');
   add.className = 'btn primary';
-  add.textContent = 'Add to route';
+  add.textContent = t('Add to route');
   add.addEventListener('click', onAdd);
   card.append(add);
   return card;

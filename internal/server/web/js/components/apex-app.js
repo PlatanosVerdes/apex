@@ -2,6 +2,7 @@ import { LitElement, html, nothing, svg } from '../../vendor/lit-3.3.3.js';
 import { BASE_PREVIEWS, RouteMap } from '../map.js';
 import { googleMapsLink, googleStopCount, routePoints } from '../link.js';
 import { coords, curves, duration, km, shortDuration } from '../format.js';
+import { lang, plural, t } from '../i18n.js';
 import { fromGPX, toGPX } from '../gpx.js';
 import { fromRouteLink, toRouteLink } from '../routelink.js';
 
@@ -216,7 +217,7 @@ export class ApexApp extends LitElement {
       this.map.setLegs(this.plan.legs, request.legs?.map(l => l.style) ?? []);
       if (this.notice?.planning) this.notice = null;
     } catch (err) {
-      if (err.name !== 'AbortError') this.notice = { text: `Could not draw the route: ${err.message}`, bad: true, planning: true };
+      if (err.name !== 'AbortError') this.notice = { text: t('Could not draw the route: {err}', { err: err.message }), bad: true, planning: true };
     } finally {
       if (this.pending === pending) {
         this.planning = false;
@@ -254,8 +255,10 @@ export class ApexApp extends LitElement {
     // Out of searches says nothing here: the beating line and "Fast for now" on the leg do.
     if (c.left >= c.max || this.quotaLevel() === 'out') return nothing;
     const level = this.quotaLevel();
-    const text = level === 'very-low' ? `Only ${c.left} curve ${c.left === 1 ? 'search' : 'searches'} left` : `${c.left} of ${c.max} curve searches left`;
-    return html`<div class="quota ${level}" title="Searching for curves asks the public routing server many times, so each rider gets a few at a time; they come back by themselves.">${text}</div>`;
+    const text = level === 'very-low'
+      ? plural(c.left, 'Only {n} curve search left', 'Only {n} curve searches left')
+      : t('{left} of {max} curve searches left', { left: c.left, max: c.max });
+    return html`<div class="quota ${level}" title=${t('Searching for curves asks the public routing server many times, so each rider gets a few at a time; they come back by themselves.')}>${text}</div>`;
   }
 
   update(changed) {
@@ -341,7 +344,7 @@ export class ApexApp extends LitElement {
   }
 
   async useMyLocation() {
-    this.notice = { text: 'Waiting for your location…' };
+    this.notice = { text: t('Waiting for your location…') };
     try {
       const { coords } = await new Promise((resolve, reject) => {
         if (!navigator.geolocation) return reject(new Error('no geolocation'));
@@ -354,7 +357,7 @@ export class ApexApp extends LitElement {
     } catch {
       this.setHere(null);
       if (this.route.fromHere) this.setOption('fromHere', false);
-      this.notice = { text: 'Location not allowed, so the route starts at stop 1.', bad: true };
+      this.notice = { text: t('Location not allowed, so the route starts at stop 1.'), bad: true };
     }
   }
 
@@ -371,7 +374,7 @@ export class ApexApp extends LitElement {
     try {
       this.setLists(await this.api.lists());
     } catch (err) {
-      this.notice = { text: `Your Google lists are unavailable: ${err.message}`, bad: true };
+      this.notice = { text: t('Your Google lists are unavailable: {err}', { err: err.message }), bad: true };
     }
   }
 
@@ -390,7 +393,7 @@ export class ApexApp extends LitElement {
       const updated = await this.api.setListColour(id, colour);
       this.setLists(this.lists.map(l => (l.id === id ? updated : l)));
     } catch (err) {
-      this.listError = `Could not change the colour: ${err.message}`;
+      this.listError = t('Could not change the colour: {err}', { err: err.message });
     }
   }
 
@@ -414,9 +417,9 @@ export class ApexApp extends LitElement {
       const list = await this.api.addList(input.value);
       this.setLists([...this.lists.filter(l => l.id !== list.id), list]);
       input.value = '';
-      this.flash(`Linked "${list.name}" with ${list.places.length} places`);
+      this.flash(t('Linked "{name}" with {n} places', { name: list.name, n: list.places.length }));
     } catch (err) {
-      this.listError = `Could not link the list: ${err.message}`;
+      this.listError = t('Could not link the list: {err}', { err: err.message });
     } finally {
       this.listBusy = false;
     }
@@ -428,16 +431,16 @@ export class ApexApp extends LitElement {
     try {
       const fresh = await this.api.refreshList(id);
       this.setLists(this.lists.map(l => (l.id === id ? fresh : l)));
-      this.flash(`"${fresh.name}" is up to date`);
+      this.flash(t('"{name}" is up to date', { name: fresh.name }));
     } catch (err) {
-      this.listError = `Could not refresh: ${err.message}`;
+      this.listError = t('Could not refresh: {err}', { err: err.message });
     } finally {
       this.listBusy = false;
     }
   }
 
   async unlinkList(list) {
-    if (!confirm(`Stop showing "${list.name}"? The list stays in Google Maps.`)) return;
+    if (!confirm(t('Stop showing "{name}"? The list stays in Google Maps.', { name: list.name }))) return;
     await this.api.removeList(list.id);
     this.setLists(this.lists.filter(l => l.id !== list.id));
   }
@@ -468,7 +471,7 @@ export class ApexApp extends LitElement {
     next.splice(index, 0, stop);
     this.selected = index;
     this.setStops(next);
-    this.flash(`${place.name} added as stop ${index + 1}`);
+    this.flash(t('{name} added as stop {n}', { name: place.name, n: index + 1 }));
   }
 
   // Places from the linked lists match first, as the rider's own; the geocoder fills the rest.
@@ -522,14 +525,14 @@ export class ApexApp extends LitElement {
     const stops = this.route.stops;
     const at = this.insertAt;
     const placeholder = at === null
-      ? stops.length ? 'Search a place to add' : 'Search where to start'
-      : at === 0 ? 'Add before stop 1' : at >= stops.length ? 'Add at the end' : `Add between ${at} and ${at + 1}`;
+      ? t(stops.length ? 'Search a place to add' : 'Search where to start')
+      : at === 0 ? t('Add before stop 1') : at >= stops.length ? t('Add at the end') : t('Add between {a} and {b}', { a: at, b: at + 1 });
     return html`
       <div class="search">
         <span class="search-icon">${SEARCH_ICON}</span>
-        <input type="search" .value=${this.query} placeholder=${placeholder} aria-label="Search a place"
+        <input type="search" .value=${this.query} placeholder=${placeholder} aria-label=${t('Search a place')}
           autocomplete="off" @input=${e => this.searchPlaces(e.target.value)} @keydown=${e => this.searchKey(e)}>
-        ${at !== null ? html`<button class="icon" title="Cancel" @click=${() => (this.insertAt = null)}>✕</button>` : nothing}
+        ${at !== null ? html`<button class="icon" title=${t('Cancel')} @click=${() => (this.insertAt = null)}>✕</button>` : nothing}
         ${this.results.length ? html`
           <ul class="popover results" role="listbox">
             ${this.results.map((r, i) => html`
@@ -547,7 +550,7 @@ export class ApexApp extends LitElement {
     try {
       this.saved = await this.api.routes();
     } catch (err) {
-      this.notice = { text: `Saved routes unavailable: ${err.message}`, bad: true };
+      this.notice = { text: t('Saved routes unavailable: {err}', { err: err.message }), bad: true };
     }
   }
 
@@ -557,7 +560,7 @@ export class ApexApp extends LitElement {
     } catch {}
     if (new URLSearchParams(location.search).get('signin') === 'failed') {
       history.replaceState(null, '', '/');
-      this.notice = { text: 'Signing in did not work. Try again.', bad: true };
+      this.notice = { text: t('Signing in did not work. Try again.'), bad: true };
     }
     if (!this.account.user) return;
     this.loadSaved();
@@ -575,13 +578,13 @@ export class ApexApp extends LitElement {
     this.saved = [];
     this.setLists([]);
     this.route = { ...this.route, id: undefined };
-    this.flash('Signed out');
+    this.flash(t('Signed out'));
   }
 
   async save() {
     if (!this.account.user) {
       if (this.account.signIn) this.signIn();
-      else this.notice = { text: 'Saving routes needs an account, and this server has no sign-in set up.', bad: true };
+      else this.notice = { text: t('Saving routes needs an account, and this server has no sign-in set up.'), bad: true };
       return;
     }
     const route = { ...this.route, name: this.route.name.trim() || defaultName() };
@@ -589,10 +592,10 @@ export class ApexApp extends LitElement {
       this.route = await this.api.save(route);
       this.dirty = false;
       this.changed({ edited: false });
-      this.flash('Saved');
+      this.flash(t('Saved'));
       this.loadSaved();
     } catch (err) {
-      this.notice = { text: `Not saved: ${err.message}`, bad: true };
+      this.notice = { text: t('Not saved: {err}', { err: err.message }), bad: true };
     }
   }
 
@@ -615,14 +618,14 @@ export class ApexApp extends LitElement {
   }
 
   async remove(route) {
-    if (!confirm(`Delete "${route.name}"?`)) return;
+    if (!confirm(t('Delete "{name}"?', { name: route.name }))) return;
     await this.api.remove(route.id);
     if (this.route.id === route.id) this.route = { ...this.route, id: undefined };
     this.loadSaved();
   }
 
   confirmDiscard() {
-    return !this.dirty || this.route.stops.length === 0 || confirm('Discard the unsaved changes to this route?');
+    return !this.dirty || this.route.stops.length === 0 || confirm(t('Discard the unsaved changes to this route?'));
   }
 
   // The link, or undefined while it cannot be built yet. Advanced mode needs the plan's via points.
@@ -654,26 +657,26 @@ export class ApexApp extends LitElement {
       this.changed({ fit: true });
       this.nameUnnamed();
       this.flash(gpx.kind === 'track'
-        ? `Track imported as ${gpx.stops.length} stops along it; check the line follows it`
-        : `Imported ${gpx.stops.length} stops`);
+        ? t('Track imported as {n} stops along it; check the line follows it', { n: gpx.stops.length })
+        : plural(gpx.stops.length, 'Imported {n} stop', 'Imported {n} stops'));
     } catch (err) {
-      this.notice = { text: `Could not import ${file.name}: ${err.message}`, bad: true };
+      this.notice = { text: t('Could not import {file}: {err}', { file: file.name, err: err.message }), bad: true };
     }
   }
 
   async copy(text, what) {
     try {
       await navigator.clipboard.writeText(text);
-      this.flash(`${what} copied`);
+      this.flash(t('{what} copied', { what }));
     } catch {
       // The clipboard API needs a secure origin; plain http over Tailscale is not one.
-      prompt(`Copy the ${what.toLowerCase()}`, text);
+      prompt(t('Copy the link'), text);
     }
   }
 
   async shareRouteLink(url) {
     try {
-      await navigator.share({ title: this.route.name || 'Apex route', url });
+      await navigator.share({ title: this.route.name || t('Apex route'), url });
     } catch {}
   }
 
@@ -687,7 +690,7 @@ export class ApexApp extends LitElement {
     this.changed({ fit: true });
     this.nameUnnamed();
     if (route.fromHere) this.useMyLocation();
-    this.flash('Route opened from a link. Save it to keep your own copy.');
+    this.flash(t('Route opened from a link. Save it to keep your own copy.'));
   }
 
   renderShare(link) {
@@ -695,13 +698,13 @@ export class ApexApp extends LitElement {
     return html`
       <div class="popover share-popover">
         <div class="share-row">
-          <span class="share-label"><b>Link to this route</b><small>${apex.replace(/^https?:\/\//, '')}</small></span>
-          <button class="btn" @click=${() => this.copy(apex, 'Link')}>Copy</button>
-          ${'share' in navigator ? html`<button class="btn" @click=${() => this.shareRouteLink(apex)}>Share</button>` : nothing}
+          <span class="share-label"><b>${t('Link to this route')}</b><small>${apex.replace(/^https?:\/\//, '')}</small></span>
+          <button class="btn" @click=${() => this.copy(apex, t('Link'))}>${t('Copy')}</button>
+          ${'share' in navigator ? html`<button class="btn" @click=${() => this.shareRouteLink(apex)}>${t('Share')}</button>` : nothing}
         </div>
         <div class="share-row">
-          <span class="share-label"><b>Google Maps link</b><small>To navigate with the phone</small></span>
-          <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, 'Google Maps link')}>Copy</button>
+          <span class="share-label"><b>${t('Google Maps link')}</b><small>${t('To navigate with the phone')}</small></span>
+          <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, t('Google Maps link'))}>${t('Copy')}</button>
         </div>
       </div>
     `;
@@ -717,56 +720,56 @@ export class ApexApp extends LitElement {
     const { stops, fromHere, roundTrip, avoid } = this.route;
     const plan = this.plan;
     const avoided = this.advanced ? AVOIDS.slice(1) : AVOIDS;
-    const stillUses = avoided.filter(([key]) => avoid?.[key] && plan?.has?.[key]).map(([, label]) => label.toLowerCase());
+    const stillUses = avoided.filter(([key]) => avoid?.[key] && plan?.has?.[key]).map(([, label]) => t(label.toLowerCase()));
     const link = this.link();
     const googleStops = link ? googleStopCount(link) : 0;
 
     return html`
       <div class="map"></div>
-      <button class="locate" title="My location" @click=${() => this.map.locate()}>◎</button>
+      <button class="locate" title=${t('My location')} @click=${() => this.map.locate()}>◎</button>
       <aside class="panel ${this.collapsed ? 'collapsed' : ''} ${this.planning ? 'planning' : ''}">
         <div class="progress" aria-hidden="true"></div>
         <header>
-          <input .value=${this.route.name} placeholder="Untitled route" aria-label="Route name"
+          <input .value=${this.route.name} placeholder=${t('Untitled route')} aria-label=${t('Route name')}
             @change=${e => this.setOption('name', e.target.value)}>
           ${this.route.id && !this.dirty
-            ? html`<span class="icon saved-mark" title="Saved" aria-label="Saved">${CHECK_ICON}</span>`
-            : html`<button class="icon save" title="Save route" aria-label="Save route" ?disabled=${stops.length === 0}
+            ? html`<span class="icon saved-mark" title=${t('Saved')} aria-label=${t('Saved')}>${CHECK_ICON}</span>`
+            : html`<button class="icon save" title=${t('Save route')} aria-label=${t('Save route')} ?disabled=${stops.length === 0}
                 @click=${() => this.save()}>${SAVE_ICON}</button>`}
           <span class="more">
-            <button class="icon popover-toggle" title="More" aria-label="More" aria-haspopup="menu" aria-expanded=${this.popover === 'more'}
+            <button class="icon popover-toggle" title=${t('More')} aria-label=${t('More')} aria-haspopup="menu" aria-expanded=${this.popover === 'more'}
               @click=${() => this.togglePopover('more')}>⋯</button>
             ${this.popover === 'more' ? html`
               <div class="popover more-menu" role="menu">
-                <button role="menuitem" @click=${() => ((this.popover = null), this.startNew())}>New route</button>
-                <button role="menuitem" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>Import GPX…</button>
-                <button role="menuitem" ?disabled=${stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>Export GPX</button>
+                <button role="menuitem" @click=${() => ((this.popover = null), this.startNew())}>${t('New route')}</button>
+                <button role="menuitem" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import GPX…')}</button>
+                <button role="menuitem" ?disabled=${stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export GPX')}</button>
               </div>` : nothing}
           </span>
           ${this.renderAccount()}
           <input class="gpx-file" type="file" accept=".gpx,application/gpx+xml" hidden
             @change=${e => (this.importGPX(e.target.files[0]), (e.target.value = ''))}>
-          <button class="icon toggle" title=${this.collapsed ? 'Show' : 'Hide'}
+          <button class="icon toggle" title=${t(this.collapsed ? 'Show' : 'Hide')}
             @click=${() => (this.collapsed = !this.collapsed)}>${this.collapsed ? '▴' : '▾'}</button>
         </header>
         <div class="body">
           <div class="mode" role="tablist">
-            <button role="tab" aria-selected=${!this.advanced} @click=${() => this.setMode('simple')}>Simple</button>
-            <button role="tab" aria-selected=${this.advanced} @click=${() => this.setMode('advanced')}>Advanced</button>
+            <button role="tab" aria-selected=${!this.advanced} @click=${() => this.setMode('simple')}>${t('Simple')}</button>
+            <button role="tab" aria-selected=${this.advanced} @click=${() => this.setMode('advanced')}>${t('Advanced')}</button>
           </div>
           <div class="summary">
           <div class="totals">
             ${plan ? html`<b>${km(plan.meters)}</b><span>${duration(plan.seconds)}</span>` : nothing}
-            <span>${stops.length} ${stops.length === 1 ? 'stop' : 'stops'}</span>
-            ${this.planning ? html`<span class="working">${this.advanced ? 'Looking for curves' : 'Routing'}</span>` : nothing}
+            <span>${plural(stops.length, '{n} stop', '{n} stops')}</span>
+            ${this.planning ? html`<span class="working">${t(this.advanced ? 'Looking for curves' : 'Routing')}</span>` : nothing}
           </div>
-          <button class="icon popover-toggle gear" title="Avoid motorways, tolls or ferries" aria-label="Avoid" aria-expanded=${this.popover === 'options'}
+          <button class="icon popover-toggle gear" title=${t('Avoid motorways, tolls or ferries')} aria-label=${t('Avoid')} aria-expanded=${this.popover === 'options'}
             @click=${() => this.togglePopover('options')}>${GEAR_ICON}</button>
           ${this.popover === 'options' ? this.renderRouteOptions() : nothing}
           </div>
           ${this.renderCurves()}
           ${this.activeOptions().length
-            ? html`<div class="chips">${this.activeOptions().map(o => html`<button class="chip-tag popover-toggle" @click=${() => this.togglePopover('options')}>${o}</button>`)}</div>`
+            ? html`<div class="chips">${this.activeOptions().map(o => html`<button class="chip-tag popover-toggle" @click=${() => this.togglePopover('options')}>${t(o)}</button>`)}</div>`
             : nothing}
           ${this.renderSearch()}
           <ol class="stops">
@@ -777,24 +780,24 @@ export class ApexApp extends LitElement {
           </ol>
           <p class="hint">
             ${stops.length === 0
-              ? 'Click the map to add the first stop.'
-              : 'Click the map to add a stop at the end, or the line to add one in between. Drag a stop to move it.'}
-            ${stops.length > 1 ? html` <a href="#" @click=${e => (e.preventDefault(), this.reverse())}>Reverse</a>` : nothing}
+              ? t('Click the map to add the first stop.')
+              : t('Click the map to add a stop at the end, or the line to add one in between. Drag a stop to move it.')}
+            ${stops.length > 1 ? html` <a href="#" @click=${e => (e.preventDefault(), this.reverse())}>${t('Reverse')}</a>` : nothing}
           </p>
           ${googleStops > TESTED_GOOGLE_STOPS
-            ? html`<p class="notice">Google Maps will list ${googleStops} stops; links have been tested up to ${TESTED_GOOGLE_STOPS}.</p>`
+            ? html`<p class="notice">${t('Google Maps will list {n} stops; links have been tested up to {max}.', { n: googleStops, max: TESTED_GOOGLE_STOPS })}</p>`
             : nothing}
           ${stillUses.length
-            ? html`<p class="notice">No way around it: the route still uses ${stillUses.join(' and ')}.</p>`
+            ? html`<p class="notice">${t('No way around it: the route still uses {what}.', { what: stillUses.join(t(' and ')) })}</p>`
             : nothing}
           ${this.notice ? html`<p class="notice ${this.notice.bad ? 'bad' : ''}">${this.notice.text}</p>` : nothing}
           ${this.renderSaved()}
         </div>
         <div class="actions">
           <a class="btn primary" href=${link ?? '#'} target="_blank" rel="noopener" aria-disabled=${!link}>
-            ${this.advanced && this.planning ? 'Working out the route…' : 'Open in Google Maps'}
+            ${t(this.advanced && this.planning ? 'Working out the route…' : 'Open in Google Maps')}
           </a>
-          <button class="btn square popover-toggle" title="Share" aria-label="Share" aria-expanded=${this.popover === 'share'}
+          <button class="btn square popover-toggle" title=${t('Share')} aria-label=${t('Share')} aria-expanded=${this.popover === 'share'}
             ?disabled=${stops.length === 0} @click=${() => this.togglePopover('share')}>${SHARE_ICON}</button>
           ${this.popover === 'share' ? this.renderShare(link) : nothing}
         </div>
@@ -814,14 +817,14 @@ export class ApexApp extends LitElement {
     return html`
       <li class="item">
         <div class="stop ${line.join(' ')} ${i === this.selected ? 'selected' : ''}" @click=${() => this.select(i)}>
-          <span class="grip" title="Drag to reorder" @click=${e => e.stopPropagation()}>⠿</span>
+          <span class="grip" title=${t('Drag to reorder')} @click=${e => e.stopPropagation()}>⠿</span>
           <span class="n">${i + 1}</span>
           <span class="label" title=${coords(s)}>
             <span class="name ${s.name ? '' : 'pending'}">${s.name || coords(s)}</span>
             ${s.detail ? html`<span class="detail">${s.detail}</span>` : nothing}
           </span>
           ${!this.advanced && arriving ? html`<span class="km">${km(arriving.meters)}</span>` : nothing}
-          <button class="icon remove" title="Remove" @click=${e => (e.stopPropagation(), this.removeStop(i))}>✕</button>
+          <button class="icon remove" title=${t('Remove')} @click=${e => (e.stopPropagation(), this.removeStop(i))}>✕</button>
         </div>
         ${this.advanced && leaving ? this.renderLeg(i, legs[i + this.offset]) : nothing}
         ${!this.advanced && leaving
@@ -839,13 +842,13 @@ export class ApexApp extends LitElement {
   // The route can start where the rider is; off, stop 1 is the start.
   renderStart() {
     if (!this.route.fromHere) {
-      return html`<li class="endpoint off"><button @click=${() => this.useMyLocation()}><span class="dot here"></span>Start from my location</button></li>`;
+      return html`<li class="endpoint off"><button @click=${() => this.useMyLocation()}><span class="dot here"></span>${t('Start from my location')}</button></li>`;
     }
     return html`
       <li class="endpoint ${this.route.stops.length ? `out-${this.legStyle(-1)}` : ''}">
         <span class="dot here"></span>
-        <span class="label"><span class="name">My location</span><span class="detail">${this.here ? 'Wherever you are when you open the link' : 'Waiting for your location…'}</span></span>
-        <button class="icon" title="Start at stop 1 instead" @click=${() => (this.setHere(null), this.setOption('fromHere', false))}>✕</button>
+        <span class="label"><span class="name">${t('My location')}</span><span class="detail">${t(this.here ? 'Wherever you are when you open the link' : 'Waiting for your location…')}</span></span>
+        <button class="icon" title=${t('Start at stop 1 instead')} @click=${() => (this.setHere(null), this.setOption('fromHere', false))}>✕</button>
       </li>
     `;
   }
@@ -855,15 +858,15 @@ export class ApexApp extends LitElement {
     const stops = this.route.stops;
     if (stops.length < 2) return nothing;
     if (!this.route.roundTrip) {
-      return html`<li class="endpoint off"><button @click=${() => this.setOption('roundTrip', true)}><span class="dot back">${RETURN_ICON}</span>Return to the start</button></li>`;
+      return html`<li class="endpoint off"><button @click=${() => this.setOption('roundTrip', true)}><span class="dot back">${RETURN_ICON}</span>${t('Return to the start')}</button></li>`;
     }
     const back = this.plan?.legs[stops.length - 1 + this.offset];
     return html`
       <li class="endpoint in-${this.legStyle(stops.length - 1)}">
         <span class="dot back">${RETURN_ICON}</span>
-        <span class="label"><span class="name">Back to ${stops[0].name || 'stop 1'}</span><span class="detail">Round trip</span></span>
+        <span class="label"><span class="name">${t('Back to {name}', { name: stops[0].name || t('stop 1') })}</span><span class="detail">${t('Round trip')}</span></span>
         ${!this.advanced && back ? html`<span class="km">${km(back.meters)}</span>` : nothing}
-        <button class="icon" title="End at the last stop" @click=${() => this.setOption('roundTrip', false)}>✕</button>
+        <button class="icon" title=${t('End at the last stop')} @click=${() => this.setOption('roundTrip', false)}>✕</button>
       </li>
     `;
   }
@@ -881,22 +884,22 @@ export class ApexApp extends LitElement {
         <div class="leg-body">
           <span class="leg-pick">
             <button class="pill popover-toggle" aria-haspopup="menu" aria-expanded=${this.popover === menu}
-              title="How to ride this leg" @click=${e => this.openLegMenu(menu, e.currentTarget)}>${label} ▾</button>
-            ${noMotorways ? html`<span class="no-motorways" title="No motorways">${NO_MOTORWAY_ICON}</span>` : nothing}
+              title=${t('How to ride this leg')} @click=${e => this.openLegMenu(menu, e.currentTarget)}>${t(label)} ▾</button>
+            ${noMotorways ? html`<span class="no-motorways" title=${t('No motorways')}>${NO_MOTORWAY_ICON}</span>` : nothing}
             ${this.popover === menu ? html`
               <div class="popover leg-menu ${this.menuUp ? 'up' : ''}" role="menu">
                 ${STYLES.map(([value, text]) => html`
                   <div class="menu-row">
-                    <button class="dot-pick" title=${`Colour of ${text.toLowerCase()} legs`} aria-label=${`Colour of ${text.toLowerCase()} legs`}
+                    <button class="dot-pick" title=${t('Colour of {kind} legs', { kind: t(text) })} aria-label=${t('Colour of {kind} legs', { kind: t(text) })}
                       aria-expanded=${this.colourEdit === value}
                       @click=${() => (this.colourEdit = this.colourEdit === value ? null : value)}><span class="style-dot ${value}"></span></button>
                     <button role="menuitemradio" aria-checked=${leg.style === value}
-                      @click=${() => (this.setLeg(i, { style: value }), (this.popover = null))}>${text}</button>
+                      @click=${() => (this.setLeg(i, { style: value }), (this.popover = null))}>${t(text)}</button>
                   </div>
                   ${this.colourEdit === value ? this.renderSwatches(value) : nothing}`)}
                 ${leg.style === 'fast'
                   ? html`<label><input type="checkbox" .checked=${leg.avoidHighways}
-                      @change=${e => this.setLeg(i, { avoidHighways: e.target.checked })}> No motorways</label>`
+                      @change=${e => this.setLeg(i, { avoidHighways: e.target.checked })}> ${t('No motorways')}</label>`
                   : nothing}
               </div>` : nothing}
           </span>
@@ -913,12 +916,12 @@ export class ApexApp extends LitElement {
       <span class="facts">
         <span>${km(planned.meters)}</span>
         <span>${shortDuration(planned.seconds)}</span>
-        <span class="curves" title=${`${Math.round(planned.curvature)}° turned per km`}>
-          <span class="bars">${[1, 2, 3, 4, 5].map(n => html`<i class=${n <= c.level ? 'on' : ''}></i>`)}</span>${c.label}
+        <span class="curves" title=${t('{deg}° turned per km', { deg: Math.round(planned.curvature) })}>
+          <span class="bars">${[1, 2, 3, 4, 5].map(n => html`<i class=${n <= c.level ? 'on' : ''}></i>`)}</span>${t(c.label)}
         </span>
-        ${planned.limited ? html`<span class="limited" title="Out of curve searches for a moment: drawn fast without motorways, and redone with curves by itself.">Fast for now</span>` : nothing}
+        ${planned.limited ? html`<span class="limited" title=${t('Out of curve searches for a moment: drawn fast without motorways, and redone with curves by itself.')}>${t('Fast for now')}</span>` : nothing}
         ${hidden
-          ? html`<span class="hidden" title=${`${hidden} hidden ${hidden === 1 ? 'stop' : 'stops'} so Google Maps rides this leg as drawn; it lists them as stops`}>+${hidden}</span>`
+          ? html`<span class="hidden" title=${plural(hidden, '{n} hidden stop so Google Maps rides this leg as drawn; it lists it as a stop', '{n} hidden stops so Google Maps rides this leg as drawn; it lists them as stops')}>+${hidden}</span>`
           : nothing}
       </span>
     `;
@@ -943,10 +946,10 @@ export class ApexApp extends LitElement {
     const avoided = this.advanced ? AVOIDS.slice(1) : AVOIDS;
     return html`
       <div class="popover options-popover">
-        <span class="group">Avoid</span>
+        <span class="group">${t('Avoid')}</span>
         ${avoided.map(([key, label]) => html`
-          <label><input type="checkbox" .checked=${!!avoid?.[key]} @change=${e => this.setAvoid(key, e.target.checked)}> ${label}</label>`)}
-        ${this.advanced ? html`<p class="hint">Motorways are chosen per leg in advanced mode.</p>` : nothing}
+          <label><input type="checkbox" .checked=${!!avoid?.[key]} @change=${e => this.setAvoid(key, e.target.checked)}> ${t(label)}</label>`)}
+        ${this.advanced ? html`<p class="hint">${t('Motorways are chosen per leg in advanced mode.')}</p>` : nothing}
       </div>
     `;
   }
@@ -963,8 +966,8 @@ export class ApexApp extends LitElement {
 
   // insertButton sits in the middle of the line between two points and adds a found place right there.
   insertButton(at) {
-    const where = at === 0 ? 'before stop 1' : at >= this.route.stops.length ? 'at the end' : `between ${at} and ${at + 1}`;
-    return html`<button class=${`insert-here ${this.insertAt === at ? 'on' : ''}`} title=${`Add a stop ${where}`} aria-label=${`Add a stop ${where}`}
+    const where = at === 0 ? t('Add a stop before stop 1') : at >= this.route.stops.length ? t('Add a stop at the end') : t('Add a stop between {a} and {b}', { a: at, b: at + 1 });
+    return html`<button class=${`insert-here ${this.insertAt === at ? 'on' : ''}`} title=${where} aria-label=${where}
       @click=${() => this.insertHere(at)}>+</button>`;
   }
 
@@ -977,7 +980,7 @@ export class ApexApp extends LitElement {
   renderSwatches(style) {
     const chosen = legColours()[style];
     return html`
-      <div class="swatch-strip" role="radiogroup" aria-label=${`Colour of ${style} legs`}>
+      <div class="swatch-strip" role="radiogroup" aria-label=${t('Colour of {kind} legs', { kind: t(STYLES.find(([v]) => v === style)[1]) })}>
         ${Object.keys(LEG_COLOURS).map(c => html`
           <button class="swatch-pick leg-colour-${c}" role="radio" aria-checked=${chosen === c} title=${c} aria-label=${c}
             @click=${() => (setLegColour(style, c), this.requestUpdate())}></button>`)}
@@ -989,9 +992,9 @@ export class ApexApp extends LitElement {
   renderBasemap() {
     const flip = this.map.base === 'Satellite' ? 'Roads' : 'Satellite';
     return html`
-      <button class="basemap" title=${`Switch to ${BASE_LABELS[flip]}`}
+      <button class="basemap" title=${t('Switch to {name}', { name: t(BASE_LABELS[flip]) })}
         @click=${() => (this.map.setBase(flip), this.requestUpdate())}>
-        <img src=${BASE_PREVIEWS[flip]} alt=""><span>${BASE_LABELS[flip]}</span>
+        <img src=${BASE_PREVIEWS[flip]} alt=""><span>${t(BASE_LABELS[flip])}</span>
       </button>
     `;
   }
@@ -1005,19 +1008,19 @@ export class ApexApp extends LitElement {
       return html`
         <span class="account">
           <button class="small popover-toggle" aria-expanded=${this.popover === 'account'}
-            @click=${() => (signIn === 'dev' ? this.togglePopover('account') : this.signIn())}>Sign in</button>
+            @click=${() => (signIn === 'dev' ? this.togglePopover('account') : this.signIn())}>${t('Sign in')}</button>
           ${this.popover === 'account' ? html`
             <div class="popover account-menu" role="menu">
-              <span class="menu-note">Test riders (development only)</span>
-              <button role="menuitem" @click=${() => this.signIn('a')}>Rider A</button>
-              <button role="menuitem" @click=${() => this.signIn('b')}>Rider B</button>
+              <span class="menu-note">${t('Test riders (development only)')}</span>
+              <button role="menuitem" @click=${() => this.signIn('a')}>${t('Rider A')}</button>
+              <button role="menuitem" @click=${() => this.signIn('b')}>${t('Rider B')}</button>
             </div>` : nothing}
         </span>`;
     }
     const initial = (user.name || user.email).trim().charAt(0).toUpperCase();
     return html`
       <span class="account">
-        <button class="avatar popover-toggle" title=${user.email} aria-label="Account" aria-expanded=${this.popover === 'account'}
+        <button class="avatar popover-toggle" title=${user.email} aria-label=${t('Account')} aria-expanded=${this.popover === 'account'}
           @click=${() => this.togglePopover('account')}>
           ${user.picture ? html`<img src=${user.picture} alt="" referrerpolicy="no-referrer">` : initial}
         </button>
@@ -1027,36 +1030,36 @@ export class ApexApp extends LitElement {
               ${user.name ? html`<b>${user.name}</b>` : nothing}
               <span>${user.email}</span>
             </div>
-            <button role="menuitem" @click=${() => ((this.popover = null), this.signOut())}>Sign out</button>
+            <button role="menuitem" @click=${() => ((this.popover = null), this.signOut())}>${t('Sign out')}</button>
           </div>` : nothing}
       </span>`;
   }
 
   renderLayers() {
     return html`
-      <button class="map-button places-toggle popover-toggle" title="My places" aria-label="My places" aria-expanded=${this.popover === 'places'}
+      <button class="map-button places-toggle popover-toggle" title=${t('My places')} aria-label=${t('My places')} aria-expanded=${this.popover === 'places'}
         @click=${() => this.togglePopover('places')}>${PLACES_ICON}</button>
       ${this.popover === 'places' ? html`
         <div class="popover map-popover places-popover">
-          <h3>My places</h3>
+          <h3>${t('My places')}</h3>
           ${!this.account.user ? html`
-            <p class="hint">Sign in to link your Google Maps lists and keep them on every device.</p>
-            ${this.account.signIn ? html`<button class="btn primary signin-btn" @click=${() => this.signIn()}>Sign in</button>` : nothing}
+            <p class="hint">${t('Sign in to link your Google Maps lists and keep them on every device.')}</p>
+            ${this.account.signIn ? html`<button class="btn primary signin-btn" @click=${() => this.signIn()}>${t('Sign in')}</button>` : nothing}
           ` : html`
           <ul class="layer-lists">
             ${this.lists.map(l => html`
               <li>
-                <label class="switch" title=${this.hiddenLists.has(l.id) ? 'Show on the map' : 'Hide from the map'}>
+                <label class="switch" title=${t(this.hiddenLists.has(l.id) ? 'Show on the map' : 'Hide from the map')}>
                   <input type="checkbox" role="switch" .checked=${!this.hiddenLists.has(l.id)} @change=${e => this.toggleList(l.id, e.target.checked)}>
                   <span></span>
                 </label>
-                <button class="colour-button" title="Colour" @click=${() => (this.pickingColour = this.pickingColour === l.id ? null : l.id)}>${this.listBadge(l)}</button>
+                <button class="colour-button" title=${t('Colour')} @click=${() => (this.pickingColour = this.pickingColour === l.id ? null : l.id)}>${this.listBadge(l)}</button>
                 <span class="list-text">
                   <span class="list-name">${l.name}</span>
-                  <small>${l.places.length} places</small>
+                  <small>${plural(l.places.length, '{n} place', '{n} places')}</small>
                 </span>
-                <button class="icon" title="Refresh from Google Maps" ?disabled=${this.listBusy} @click=${() => this.refreshList(l.id)}>↻</button>
-                <button class="icon" title="Unlink" @click=${() => this.unlinkList(l)}>✕</button>
+                <button class="icon" title=${t('Refresh from Google Maps')} ?disabled=${this.listBusy} @click=${() => this.refreshList(l.id)}>↻</button>
+                <button class="icon" title=${t('Unlink')} @click=${() => this.unlinkList(l)}>✕</button>
               </li>
               ${this.pickingColour === l.id ? html`
                 <li class="palette">
@@ -1065,12 +1068,12 @@ export class ApexApp extends LitElement {
                 </li>` : nothing}`)}
           </ul>
           <form class="add-list" @submit=${e => (e.preventDefault(), this.addList(e.target))}>
-            <input name="url" type="url" required placeholder="Paste a Google Maps list link" aria-label="Google Maps list link">
-            <button class="btn primary" ?disabled=${this.listBusy}>${this.listBusy ? 'Adding…' : 'Add'}</button>
+            <input name="url" type="url" required placeholder=${t('Paste a Google Maps list link')} aria-label=${t('Google Maps list link')}>
+            <button class="btn primary" ?disabled=${this.listBusy}>${t(this.listBusy ? 'Adding…' : 'Add')}</button>
           </form>
           ${this.listError ? html`<p class="notice bad">${this.listError}</p>` : nothing}
           ${this.lists.length === 0
-            ? html`<p class="hint">In Google Maps open a list, tap Share and paste the link. It stays linked and refreshes by itself.</p>`
+            ? html`<p class="hint">${t('In Google Maps open a list, tap Share and paste the link. It stays linked and refreshes by itself.')}</p>`
             : nothing}
           `}
         </div>` : nothing}
@@ -1081,12 +1084,12 @@ export class ApexApp extends LitElement {
     if (this.saved.length === 0) return nothing;
     return html`
       <section class="saved">
-        <h2>Saved routes</h2>
+        <h2>${t('Saved routes')}</h2>
         <ul>
           ${this.saved.map(r => html`
             <li class=${r.id === this.route.id ? 'current' : ''}>
-              <button class="open" @click=${() => this.open(r)}>${r.name} <small>${r.stops.length} stops</small></button>
-              <button class="icon" title="Delete" @click=${() => this.remove(r)}>✕</button>
+              <button class="open" @click=${() => this.open(r)}>${r.name} <small>${plural(r.stops.length, '{n} stop', '{n} stops')}</small></button>
+              <button class="icon" title=${t('Delete')} @click=${() => this.remove(r)}>✕</button>
             </li>`)}
         </ul>
       </section>
@@ -1099,7 +1102,7 @@ function blankRoute() {
 }
 
 function defaultName() {
-  return `Route ${new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`;
+  return t('Route {date}', { date: new Date().toLocaleDateString(lang === 'es' ? 'es-ES' : 'en-GB', { day: 'numeric', month: 'short' }) });
 }
 
 function loadDraft() {

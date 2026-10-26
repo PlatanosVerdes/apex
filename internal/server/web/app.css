@@ -441,3 +441,11 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .panel header .save { color: var(--ink); }
 .panel header .saved-mark { color: var(--muted); cursor: default; }
 .panel header .saved-mark:hover { background: none; }
+
+.legs-trial {
+  position: absolute; z-index: 1001; top: 12px; left: 50%; transform: translateX(-50%); margin-left: 186px;
+  display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--card); box-shadow: 0 2px 12px rgb(0 0 0 / .3);
+}
+.legs-trial button { white-space: nowrap; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
+.legs-trial button[aria-pressed="true"] { background: var(--soft); color: var(--ink); }
+@media (max-width: 720px) {
