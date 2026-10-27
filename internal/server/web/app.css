@@ -30,7 +30,8 @@ apex-app { display: block; position: fixed; inset: 0; }
 .leaflet-container { font: inherit; }
 /* A click adds a stop, so the map shows a crosshair; the hand appears only while panning. */
 .map.leaflet-grab { cursor: crosshair; }
-.map.leaflet-dragging.leaflet-grab { cursor: grabbing; }
+/* Leaflet marks a pan on <body>, so the hand covers everything on the map until it is let go. */
+body.leaflet-dragging .map, body.leaflet-dragging .map * { cursor: grabbing !important; }
 .leaflet-marker-icon.stop-pin { cursor: move; }
 .leaflet-interactive.leg { stroke: var(--route); stroke-opacity: .8; cursor: copy; }
 .leaflet-interactive.leg:hover { stroke-opacity: 1; stroke-width: 9; }
