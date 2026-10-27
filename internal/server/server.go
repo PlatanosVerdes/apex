@@ -68,18 +68,23 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	static, _ := fs.Sub(web, "web")
-	files := http.FileServerFS(static)
+	files := assets(static)
 	mux := http.NewServeMux()
-	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		files.ServeHTTP(w, r)
-	}))
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name == "" {
+			name = "index.html"
+		}
+		a, ok := files[name]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		serveAsset(w, r, name, a)
+	})
 	// A route link (/r/lat,lng/lat,lng/...?options) opens the page itself, which reads the route from it.
-	index, _ := fs.ReadFile(static, "index.html")
 	mux.HandleFunc("GET /r/{points...}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(index)
+		serveAsset(w, r, "index.html", files["index.html"])
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok "+s.Version+"\n")
@@ -102,7 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/lists/{id}/refresh", s.signedIn(s.refreshList))
 	mux.HandleFunc("PATCH /api/lists/{id}", s.signedIn(s.setListColour))
 	mux.HandleFunc("DELETE /api/lists/{id}", s.signedIn(s.deleteList))
-	return secure(sameOrigin(s.counted(mux)), s.Sessions.Secure)
+	return secure(sameOrigin(gzipJSON(s.counted(mux))), s.Sessions.Secure)
 }
 
 // secure sets the headers a public page is expected to send. With HTTPS on, a visit that came in over

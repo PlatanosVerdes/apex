@@ -86,7 +86,7 @@ func run() error {
 		ClientIPHeader: env("APEX_CLIENT_IP_HEADER", ""),
 		Public:         limit.New(number("APEX_PUBLIC_REQUESTS", 120), duration("APEX_PUBLIC_REFILL", 500*time.Millisecond)),
 		ListSource:     gmaps.New(),
-		Planner:        &plan.Planner{Router: valhalla.New(routerURL, userAgent), Parallel: 2},
+		Planner:        &plan.Planner{Router: valhalla.New(routerURL, userAgent), Parallel: 3},
 		// A curve search costs the public routing server five to ten requests; a fast leg costs one.
 		Curves:  limit.New(number("APEX_CURVE_SEARCHES", 20), duration("APEX_CURVE_REFILL", 30*time.Second)),
 		Places:  nominatim.New(nominatimURL, userAgent),

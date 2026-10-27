@@ -173,3 +173,49 @@ func abs(n int) int {
 	}
 	return n
 }
+
+// Simplify drops the points a line does not need to stay within tolerance metres of where it was
+// (Douglas-Peucker): a road drawn every few metres becomes a few hundred points that look the same.
+func Simplify(path []latLng, tolerance float64) []latLng {
+	if len(path) < 3 {
+		return path
+	}
+	keep := make([]bool, len(path))
+	keep[0], keep[len(path)-1] = true, true
+	type span struct{ from, to int }
+	stack := []span{{0, len(path) - 1}}
+	for len(stack) > 0 {
+		sp := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		far, at := 0.0, -1
+		for i := sp.from + 1; i < sp.to; i++ {
+			if d := offLine(path[i], path[sp.from], path[sp.to]); d > far {
+				far, at = d, i
+			}
+		}
+		if at >= 0 && far > tolerance {
+			keep[at] = true
+			stack = append(stack, span{sp.from, at}, span{at, sp.to})
+		}
+	}
+	out := make([]latLng, 0, len(path)/4)
+	for i, k := range keep {
+		if k {
+			out = append(out, path[i])
+		}
+	}
+	return out
+}
+
+// offLine is how far p lies from the segment a-b, in metres, on a flat projection around a.
+func offLine(p, a, b latLng) float64 {
+	k := math.Cos(a[0] * math.Pi / 180)
+	px, py := (p[1]-a[1])*111320*k, (p[0]-a[0])*111320
+	bx, by := (b[1]-a[1])*111320*k, (b[0]-a[0])*111320
+	l2 := bx*bx + by*by
+	if l2 == 0 {
+		return math.Hypot(px, py)
+	}
+	t := math.Max(0, math.Min(1, (px*bx+py*by)/l2))
+	return math.Hypot(px-t*bx, py-t*by)
+}

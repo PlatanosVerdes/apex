@@ -49,8 +49,7 @@ func (s *Server) Gauges() {
 	}
 	s.Metrics.Gauge("apex_accounts", "Riders with an account.", totals(func(*store.UserData) int { return 1 }))
 	s.Metrics.Gauge("apex_saved_routes", "Routes kept across every account.", totals(func(d *store.UserData) int {
-		routes, _ := d.Routes.List()
-		return len(routes)
+		return d.Routes.Count()
 	}))
 	s.Metrics.Gauge("apex_linked_lists", "Google Maps lists linked across every account.", totals(func(d *store.UserData) int {
 		lists, _ := d.Lists.All()

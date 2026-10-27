@@ -66,13 +66,12 @@ type Planner struct {
 	Parallel int
 
 	mu    sync.Mutex
-	cache map[string]planned
+	cache map[string]valhalla.Route
 }
 
-type planned struct {
-	leg Leg
-	has valhalla.Avoid
-}
+// simplifyMeters is how far a kept line may stray from Valhalla's: invisible on the map, and it
+// leaves a fifth of the points or fewer to send, keep and draw.
+const simplifyMeters = 5
 
 const (
 	// A via point goes wherever the leg strays farther than this from the way Google would go.
@@ -93,15 +92,7 @@ func (p *Planner) Plan(ctx context.Context, pts []valhalla.Point, legs []LegOpti
 		return Plan{}, errors.New("a route needs two points")
 	}
 	if legs == nil {
-		r, err := p.Router.Route(ctx, pts, valhalla.Options{Avoid: avoid})
-		if err != nil {
-			return Plan{}, err
-		}
-		out := Plan{Meters: r.Meters, Seconds: r.Seconds, Has: r.Has, Link: avoid}
-		for _, l := range r.Legs {
-			out.Legs = append(out.Legs, Leg{Meters: l.Meters, Seconds: l.Seconds, Path: l.Path, Via: []latLng{}, Curvature: Curvature(l.Path)})
-		}
-		return out, nil
+		return p.fastPlan(ctx, pts, avoid)
 	}
 	if len(legs) != len(pts)-1 {
 		return Plan{}, fmt.Errorf("%d legs for %d points", len(legs), len(pts))
@@ -142,81 +133,160 @@ func (p *Planner) Plan(ctx context.Context, pts []valhalla.Point, legs []LegOpti
 	return out, nil
 }
 
-// cachedLeg answers a leg worked out before from memory, so editing elsewhere on the route spends
-// no curve searches on legs that did not change.
+// cachedLeg works a leg out in two parts kept apart in memory: which roads it takes, which depends
+// only on its own ends and options, and the hidden stops for Google, which also depend on the whole
+// route's avoid settings. Adding a stop can change those settings, but never sends an unchanged leg
+// back to search for curves.
 func (p *Planner) cachedLeg(ctx context.Context, a, b valhalla.Point, o LegOptions, avoid, link valhalla.Avoid, allow func() bool) (Leg, valhalla.Avoid, error) {
-	key := fmt.Sprint(a, b, o, avoid, link)
-	p.mu.Lock()
-	hit, ok := p.cache[key]
-	p.mu.Unlock()
-	if ok {
-		return hit.leg, hit.has, nil
-	}
-	if o.Style != Fast && allow != nil && !allow() {
-		leg, has, err := p.leg(ctx, a, b, LegOptions{Style: Fast, AvoidHighways: true}, avoid, link)
-		leg.Limited = true
-		return leg, has, err // not cached: the curvy leg is still owed once the budget refills
-	}
-	leg, has, err := p.leg(ctx, a, b, o, avoid, link)
-	if err != nil {
-		return Leg{}, valhalla.Avoid{}, err
-	}
-	p.mu.Lock()
-	if p.cache == nil || len(p.cache) > 2000 {
-		p.cache = map[string]planned{}
-	}
-	p.cache[key] = planned{leg, has}
-	p.mu.Unlock()
-	return leg, has, nil
-}
-
-func (p *Planner) leg(ctx context.Context, a, b valhalla.Point, o LegOptions, avoid, link valhalla.Avoid) (Leg, valhalla.Avoid, error) {
 	own := avoid
 	own.Highways = o.AvoidHighways || o.Style != Fast
-	var r valhalla.Route
-	var err error
-	if o.Style == Fast {
-		r, err = p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: own})
-	} else {
-		r, err = p.curviest(ctx, a, b, own, slack[o.Style])
+	routeKey := fmt.Sprint("route", a, b, o.Style, own)
+	r, ok := p.recall(routeKey)
+	limited := false
+	if !ok {
+		var err error
+		switch {
+		case o.Style == Fast:
+			r, err = p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: own})
+		case allow != nil && !allow():
+			// Not kept: the curvy leg is still owed once the budget refills.
+			limited = true
+			r, err = p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: own})
+		default:
+			r, err = p.curviest(valhalla.Searching(ctx), a, b, own, slack[o.Style])
+		}
+		if err != nil {
+			return Leg{}, valhalla.Avoid{}, err
+		}
+		r.Legs[0].Path = Simplify(r.Legs[0].Path, simplifyMeters)
+		if !limited {
+			p.remember(routeKey, r)
+		}
 	}
+	path := r.Legs[0].Path
+	leg := Leg{Meters: r.Meters, Seconds: r.Seconds, Path: path, Via: []latLng{}, Curvature: Curvature(path), Limited: limited}
+	// Google, asked with the link's settings, already drives a fast leg with the same settings.
+	if o.Style == Fast && own == link {
+		return leg, r.Has, nil
+	}
+	viaKey := fmt.Sprint("via", a, b, o.Style, own, link, limited)
+	if v, ok := p.recall(viaKey); ok {
+		leg.Via = v.Legs[0].Path
+		return leg, r.Has, nil
+	}
+	via, err := p.shape(valhalla.Searching(ctx), a, b, path, link)
 	if err != nil {
 		return Leg{}, valhalla.Avoid{}, err
 	}
-	path := r.Legs[0].Path
-	leg := Leg{Meters: r.Meters, Seconds: r.Seconds, Path: path, Via: []latLng{}, Curvature: Curvature(path)}
-	// Google, asked with the link's settings, already drives a fast leg with the same settings.
-	if o.Style != Fast || own != link {
-		if leg.Via, err = p.shape(ctx, a, b, path, link); err != nil {
-			return Leg{}, valhalla.Avoid{}, err
-		}
-	}
+	leg.Via = via
+	p.remember(viaKey, valhalla.Route{Legs: []valhalla.Leg{{Path: via}}})
 	return leg, r.Has, nil
 }
 
-// curviest looks for bendier ways than the fast one by closing off the fast way's straightest
-// stretches, round after round, and keeps the bendiest that stays within slack of the fast time.
+// fastPlan routes every leg the fast way. Legs are kept one by one, so a stop added to a drawn
+// route asks only for its two new legs; each run of legs not kept yet is still a single call.
+func (p *Planner) fastPlan(ctx context.Context, pts []valhalla.Point, avoid valhalla.Avoid) (Plan, error) {
+	n := len(pts) - 1
+	key := func(i int) string { return fmt.Sprint("leg", pts[i], pts[i+1], avoid) }
+	routes := make([]valhalla.Route, n)
+	var runs [][2]int
+	for i := range n {
+		r, ok := p.recall(key(i))
+		switch {
+		case ok:
+			routes[i] = r
+		case len(runs) > 0 && runs[len(runs)-1][1] == i:
+			runs[len(runs)-1][1] = i + 1
+		default:
+			runs = append(runs, [2]int{i, i + 1})
+		}
+	}
+	errs := make([]error, len(runs))
+	var wg sync.WaitGroup
+	for k, run := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := p.Router.Route(ctx, pts[run[0]:run[1]+1], valhalla.Options{Avoid: avoid})
+			if err != nil {
+				errs[k] = err
+				return
+			}
+			// Valhalla says what a call still uses, not each leg of it, so each leg carries its run's.
+			for j, l := range r.Legs {
+				l.Path = Simplify(l.Path, simplifyMeters)
+				leg := valhalla.Route{Meters: l.Meters, Seconds: l.Seconds, Has: r.Has, Legs: []valhalla.Leg{l}}
+				routes[run[0]+j] = leg
+				p.remember(key(run[0]+j), leg)
+			}
+		}()
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return Plan{}, err
+	}
+	out := Plan{Link: avoid}
+	for _, r := range routes {
+		path := r.Legs[0].Path
+		out.Legs = append(out.Legs, Leg{Meters: r.Meters, Seconds: r.Seconds, Path: path, Via: []latLng{}, Curvature: Curvature(path)})
+		out.Meters += r.Meters
+		out.Seconds += r.Seconds
+		out.Has.Highways = out.Has.Highways || r.Has.Highways
+		out.Has.Tolls = out.Has.Tolls || r.Has.Tolls
+		out.Has.Ferries = out.Has.Ferries || r.Has.Ferries
+	}
+	return out, nil
+}
+
+func (p *Planner) recall(key string) (valhalla.Route, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.cache[key]
+	return r, ok
+}
+
+func (p *Planner) remember(key string, r valhalla.Route) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cache == nil || len(p.cache) > 1500 {
+		p.cache = map[string]valhalla.Route{}
+	}
+	p.cache[key] = r
+}
+
+// curviest looks for bendier ways than the fast one, asking for every candidate in one go: each closes off more of the fast way's
+// straightest stretches (two, four, six), so they run side by side instead of one after another.
 func (p *Planner) curviest(ctx context.Context, a, b valhalla.Point, avoid valhalla.Avoid, slack float64) (valhalla.Route, error) {
 	fast, err := p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: avoid})
 	if err != nil {
 		return valhalla.Route{}, err
 	}
+	mids := straightest(fast.Legs[0].Path, 2*searchRounds, 1500, 1000)
+	routes := make([]valhalla.Route, searchRounds)
+	ok := make([]bool, searchRounds)
+	var wg sync.WaitGroup
+	for i := range searchRounds {
+		n := min(2*(i+1), len(mids))
+		if n == 0 || (i > 0 && n == min(2*i, len(mids))) {
+			continue
+		}
+		closed := make([][]valhalla.Point, n)
+		for j, m := range mids[:n] {
+			closed[j] = square(m, 120)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: avoid, Exclude: closed})
+			routes[i], ok[i] = r, err == nil
+		}()
+	}
+	wg.Wait()
 	best, bestCurves := fast, Curvature(fast.Legs[0].Path)
-	current := fast
-	var closed [][]valhalla.Point
-	for range searchRounds {
-		mids := straightest(current.Legs[0].Path, 2, 1500, 1000)
-		if len(mids) == 0 {
-			break
+	for i, r := range routes {
+		if !ok[i] {
+			continue
 		}
-		for _, m := range mids {
-			closed = append(closed, square(m, 120))
-		}
-		r, err := p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: avoid, Exclude: closed})
-		if err != nil {
-			break // Closed off every way through; the rounds so far are what there is.
-		}
-		current = r
 		if c := Curvature(r.Legs[0].Path); c > bestCurves && r.Seconds <= fast.Seconds*slack {
 			best, bestCurves = r, c
 		}

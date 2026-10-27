@@ -1,6 +1,7 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -381,5 +382,50 @@ func TestMetricsCountWithoutNaming(t *testing.T) {
 	}
 	if strings.Contains(out, "dev.local") || strings.Contains(out, "127.0.0.1") {
 		t.Error("metrics must not name riders")
+	}
+}
+
+func TestAssetsCompressedAndCached(t *testing.T) {
+	srv, _ := newServer(t)
+	get := func(path string, headers ...string) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		for i := 0; i+1 < len(headers); i += 2 {
+			req.Header.Set(headers[i], headers[i+1])
+		}
+		resp, err := (&http.Transport{DisableCompression: true}).RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	lib := get("/vendor/leaflet-1.9.4.js", "Accept-Encoding", "gzip")
+	if lib.Header.Get("Content-Encoding") != "gzip" || !strings.Contains(lib.Header.Get("Cache-Control"), "immutable") {
+		t.Errorf("library: %v", lib.Header)
+	}
+	page := get("/", "Accept-Encoding", "gzip")
+	etag := page.Header.Get("ETag")
+	if page.StatusCode != 200 || etag == "" || page.Header.Get("Cache-Control") != "no-cache" {
+		t.Errorf("page: %d %v", page.StatusCode, page.Header)
+	}
+	if again := get("/", "If-None-Match", etag); again.StatusCode != http.StatusNotModified {
+		t.Errorf("an unchanged page must answer 304, got %d", again.StatusCode)
+	}
+	if missing := get("/nothing.js"); missing.StatusCode != http.StatusNotFound {
+		t.Errorf("missing file: %d", missing.StatusCode)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/plan", strings.NewReader(`{"points":[[39.57,2.65],[39.7,2.7]]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	plan, err := (&http.Transport{DisableCompression: true}).RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := gzip.NewReader(plan.Body)
+	if err != nil || plan.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("plan not gzipped: %v %v", err, plan.Header)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(z).Decode(&out); err != nil {
+		t.Errorf("gzipped plan does not decode: %v", err)
 	}
 }

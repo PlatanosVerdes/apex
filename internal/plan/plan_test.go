@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"math"
+	"sync/atomic"
 	"testing"
 
 	"github.com/PlatanosVerdes/apex/internal/valhalla"
@@ -69,11 +70,11 @@ func TestOffRoute(t *testing.T) {
 // off it takes a bendy detour, and with avoid.Highways it takes a slower straight road.
 type fakeRouter struct {
 	detourSeconds float64
-	calls         int
+	calls         atomic.Int32
 }
 
 func (f *fakeRouter) Route(_ context.Context, pts []valhalla.Point, o valhalla.Options) (valhalla.Route, error) {
-	f.calls++
+	f.calls.Add(1)
 	var r valhalla.Route
 	for i := 1; i < len(pts); i++ {
 		a, b := latLng{pts[i-1].Lat, pts[i-1].Lng}, latLng{pts[i].Lat, pts[i].Lng}
@@ -102,8 +103,25 @@ func TestSimpleModeIsOneRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.calls != 1 || len(p.Legs) != 1 || len(p.Legs[0].Via) != 0 || !p.Link.Tolls {
-		t.Errorf("%d calls, %+v", f.calls, p)
+	if f.calls.Load() != 1 || len(p.Legs) != 1 || len(p.Legs[0].Via) != 0 || !p.Link.Tolls {
+		t.Errorf("%d calls, %+v", f.calls.Load(), p)
+	}
+}
+
+func TestSimpleModeAsksOnlyForNewLegs(t *testing.T) {
+	f := &fakeRouter{}
+	planner := &Planner{Router: f}
+	inca, alcudia := valhalla.Point{Lat: 39.72, Lng: 2.91}, valhalla.Point{Lat: 39.85, Lng: 3.12}
+	if _, err := planner.Plan(context.Background(), []valhalla.Point{palma, inca, alcudia}, nil, valhalla.Avoid{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	between := valhalla.Point{Lat: 39.78, Lng: 3.0}
+	p, err := planner.Plan(context.Background(), []valhalla.Point{palma, inca, between, alcudia}, nil, valhalla.Avoid{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.calls.Load() != 2 || len(p.Legs) != 3 {
+		t.Errorf("a stop added between two others should take one more call for its two legs: %d calls, %d legs", f.calls.Load(), len(p.Legs))
 	}
 }
 
@@ -173,5 +191,22 @@ func TestOutOfCurveSearches(t *testing.T) {
 	}
 	if spent != 1 || p.Legs[0].Limited {
 		t.Errorf("the same leg twice must spend one search, spent %d", spent)
+	}
+}
+
+func TestSimplify(t *testing.T) {
+	a, b := latLng{39.5, 2.6}, latLng{39.6, 2.6}
+	straight := line(a, b, 500)
+	if got := Simplify(straight, 5); len(got) != 2 || got[0] != a || got[1] != b {
+		t.Errorf("a straight road keeps its two ends only, got %d points", len(got))
+	}
+	bendy := zigzag(a, b, 200, 0.001) // swings of about 85 m
+	got := Simplify(bendy, 5)
+	// Every other point lies on the straight line between two peaks: those go, the peaks stay.
+	if len(got) < 100 {
+		t.Errorf("bends wider than the tolerance must stay, kept %d of %d", len(got), len(bendy))
+	}
+	if c1, c2 := Curvature(bendy), Curvature(got); math.Abs(c1-c2)/c1 > 0.05 {
+		t.Errorf("curvature moved from %.0f to %.0f", c1, c2)
 	}
 }

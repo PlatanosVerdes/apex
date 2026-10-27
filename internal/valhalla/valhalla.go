@@ -51,6 +51,11 @@ type Client struct {
 	base      string
 	userAgent string
 	http      *http.Client
+	// slots bound the calls in flight, since the public server answers 429 to a burst. Searches
+	// have a lane of their own, so a fast leg never queues behind a curve search's many calls.
+	slots, searchSlots chan struct{}
+	// retryWait is the first pause after a 429; it doubles on each retry.
+	retryWait time.Duration
 
 	mu    sync.Mutex
 	cache map[string]Route
@@ -59,8 +64,11 @@ type Client struct {
 func New(base, userAgent string) *Client {
 	return &Client{
 		base: strings.TrimRight(base, "/"), userAgent: userAgent,
-		http:  &http.Client{Timeout: 30 * time.Second},
-		cache: map[string]Route{},
+		http:        &http.Client{Timeout: 30 * time.Second},
+		cache:       map[string]Route{},
+		slots:       make(chan struct{}, 2),
+		searchSlots: make(chan struct{}, 2),
+		retryWait:   500 * time.Millisecond,
 	}
 }
 
@@ -98,7 +106,7 @@ func (c *Client) chunk(ctx context.Context, pts []Point, o Options) (Route, erro
 		return Route{}, err
 	}
 	c.mu.Lock()
-	if len(c.cache) > 2000 {
+	if len(c.cache) > 500 {
 		c.cache = map[string]Route{}
 	}
 	c.cache[key] = r
@@ -149,13 +157,7 @@ func (c *Client) request(ctx context.Context, pts []Point, o Options) (Route, er
 		request["exclude_polygons"] = rings
 	}
 	body, _ := json.Marshal(request)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/route", bytes.NewReader(body))
-	if err != nil {
-		return Route{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", c.userAgent)
-	resp, err := c.http.Do(req)
+	resp, err := c.post(ctx, body)
 	if err != nil {
 		return Route{}, err
 	}
@@ -197,6 +199,49 @@ func (c *Client) request(ctx context.Context, pts []Point, o Options) (Route, er
 		out.Legs[i] = Leg{Meters: l.Summary.Length * 1000, Seconds: l.Summary.Time, Path: decode(l.Shape)}
 	}
 	return out, nil
+}
+
+// post sends a request through the slots and, when the server says it is too busy (429), waits and
+// tries again, three times at most.
+type searchKey struct{}
+
+// Searching marks ctx as part of a search that asks many times, so its calls take the search lane.
+func Searching(ctx context.Context) context.Context {
+	return context.WithValue(ctx, searchKey{}, true)
+}
+
+func (c *Client) post(ctx context.Context, body []byte) (*http.Response, error) {
+	slots := c.slots
+	if ctx.Value(searchKey{}) != nil {
+		slots = c.searchSlots
+	}
+	wait := c.retryWait
+	for attempt := 0; ; attempt++ {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/route", bytes.NewReader(body))
+		if err != nil {
+			<-slots
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", c.userAgent)
+		resp, err := c.http.Do(req)
+		<-slots
+		if err != nil || resp.StatusCode != http.StatusTooManyRequests || attempt == 3 {
+			return resp, err
+		}
+		resp.Body.Close()
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		wait *= 2
+	}
 }
 
 // decode reads Valhalla's shape: a Google encoded polyline with 6 decimals instead of 5.

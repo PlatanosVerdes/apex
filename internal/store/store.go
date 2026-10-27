@@ -120,6 +120,14 @@ func (s *Store) List() ([]Route, error) {
 	return routes, nil
 }
 
+// Count is how many routes are kept, without reading them.
+func (s *Store) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files, _ := filepath.Glob(filepath.Join(s.dir, "*.json"))
+	return len(files)
+}
+
 func (s *Store) Get(id string) (Route, error) {
 	if !validID.MatchString(id) {
 		return Route{}, ErrNotFound

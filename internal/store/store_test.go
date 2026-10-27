@@ -41,6 +41,9 @@ func TestPutGetListDelete(t *testing.T) {
 	if _, err := s.Get(first.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted route still there: %v", err)
 	}
+	if n := s.Count(); n != 1 {
+		t.Fatalf("count after delete: %d", n)
+	}
 }
 
 func TestRejects(t *testing.T) {

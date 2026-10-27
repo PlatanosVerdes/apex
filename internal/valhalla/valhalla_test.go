@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDecode(t *testing.T) {
@@ -74,5 +78,74 @@ func TestRouteError(t *testing.T) {
 	_, err := New(srv.URL, "test").Route(context.Background(), []Point{{39.57, 2.65}, {38.9, 1.4}}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "No path") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRetriesWhenBusyAndBoundsCalls(t *testing.T) {
+	var calls, inFlight, most atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			m := most.Load()
+			if n <= m || most.CompareAndSwap(m, n) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		if calls.Add(1)%3 == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte("<html>busy</html>"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"trip":{"summary":{"length":1,"time":60},"legs":[{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"}]}}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "test")
+	c.retryWait = time.Millisecond
+	var wg sync.WaitGroup
+	errs := make([]error, 6)
+	for i := range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.Route(context.Background(), []Point{{Lat: 39 + float64(i)/100, Lng: 2}, {Lat: 39.5, Lng: 2}}, Options{})
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("route %d: %v", i, err)
+		}
+	}
+	if most.Load() > 2 {
+		t.Errorf("%d calls in flight at once, the cap is 2", most.Load())
+	}
+}
+
+func TestFastCallsSkipTheSearchQueue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "exclude_polygons") {
+			time.Sleep(300 * time.Millisecond)
+		}
+		_, _ = w.Write([]byte(`{"trip":{"summary":{"length":1,"time":60},"legs":[{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"}]}}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "test")
+	search := Searching(context.Background())
+	closed := [][]Point{{{Lat: 39.1, Lng: 2}, {Lat: 39.2, Lng: 2}, {Lat: 39.2, Lng: 2.1}}}
+	for i := range 4 {
+		go func() {
+			_, _ = c.Route(search, []Point{{Lat: 39 + float64(i)/100, Lng: 2}, {Lat: 39.5, Lng: 2}}, Options{Exclude: closed})
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	start := time.Now()
+	if _, err := c.Route(context.Background(), []Point{{Lat: 40, Lng: 2}, {Lat: 40.5, Lng: 2}}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 150*time.Millisecond {
+		t.Errorf("a fast call waited %v behind searches", took)
 	}
 }
