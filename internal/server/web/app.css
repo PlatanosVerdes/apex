@@ -368,8 +368,17 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 
 /* After the desktop rules above, so these win on phones. */
 @media (max-width: 720px) {
-  .basemap { left: 12px; bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
-  .basemap img { width: 52px; height: 52px; }
+  /* As in Google Maps on a phone: round buttons down the right, zoom by pinching. */
+  .leaflet-control-zoom { display: none; }
+  .basemap { left: auto; right: 12px; bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
+  .basemap img { width: 44px; height: 44px; border-radius: 50%; }
+  .basemap span { display: none; }
+  .places-toggle {
+    width: 44px; height: 44px; border: 0; border-radius: 50%; box-shadow: 0 2px 10px rgb(0 0 0 / .25);
+    top: calc(68px + env(safe-area-inset-top));
+  }
+  .places-popover { top: calc(68px + env(safe-area-inset-top)); right: 64px; }
+  .locate { width: 44px; height: 44px; }
 }
 
 .panel .progress { position: absolute; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; z-index: 2; }
