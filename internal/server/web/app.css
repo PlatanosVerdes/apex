@@ -346,6 +346,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .basemap {
   position: absolute; z-index: 1000; left: 384px; bottom: 28px; padding: 0; border: 0; background: none; cursor: pointer; font: inherit;
 }
+.layers-toggle { display: none; }
 .basemap img { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 2px solid #fff; box-shadow: 0 2px 10px rgb(0 0 0 / .35); background: var(--soft); }
 .basemap span {
   position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 4px 4px; border-radius: 0 0 10px 10px;
@@ -370,9 +371,19 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 @media (max-width: 720px) {
   /* As in Google Maps on a phone: round buttons down the right, zoom by pinching. */
   .leaflet-control-zoom { display: none; }
-  .basemap { left: auto; right: 12px; bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
-  .basemap img { width: 44px; height: 44px; border-radius: 50%; }
-  .basemap span { display: none; }
+  .basemap { display: none; }
+  .layers-toggle {
+    position: absolute; z-index: 1000; right: 12px; top: calc(12px + env(safe-area-inset-top)); width: 44px; height: 44px;
+    display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+    background: var(--card); color: var(--ink); box-shadow: 0 2px 10px rgb(0 0 0 / .25);
+  }
+  .layers-toggle[aria-expanded="true"] { color: var(--accent); }
+  .layers-popover { top: calc(12px + env(safe-area-inset-top)); right: 64px; width: auto; }
+  .layer-choices { display: flex; gap: 12px; }
+  .layer-choices button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  .layer-choices img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 2px solid transparent; }
+  .layer-choices button[aria-pressed="true"] { color: var(--accent); font-weight: 600; }
+  .layer-choices button[aria-pressed="true"] img { border-color: var(--accent); }
   .places-toggle {
     width: 44px; height: 44px; border: 0; border-radius: 50%; box-shadow: 0 2px 10px rgb(0 0 0 / .25);
     top: calc(68px + env(safe-area-inset-top));

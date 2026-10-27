@@ -24,6 +24,7 @@ const PIN_ICON = svg`<svg viewBox="0 0 24 24" width="16" height="16" fill="none"
 const GEAR_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>`;
 const PLACES_ICON = svg`<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><path d="m12 6.5 1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3 1-2.1Z"/></svg>`;
 const BASE_LABELS = { Roads: 'Map', Satellite: 'Satellite' };
+const LAYERS_ICON = svg`<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>`;
 // Colours a leg kind can take, each with its light and dark shade; neon (blue, lime, magenta) is the default.
 const LEG_COLOURS = {
   blue: ['#1a73e8', '#5b9bff'], cyan: ['#0aa5c9', '#38d6ff'], green: ['#16a34a', '#4ade80'], lime: ['#6db800', '#a8f000'],
@@ -1180,6 +1181,18 @@ export class ApexApp extends LitElement {
         @click=${() => (this.map.setBase(flip), this.requestUpdate())}>
         <img src=${BASE_PREVIEWS[flip]} alt=""><span>${t(BASE_LABELS[flip])}</span>
       </button>
+      <button class="layers-toggle popover-toggle" title=${t('Map type')} aria-label=${t('Map type')} aria-expanded=${this.popover === 'layers'}
+        @click=${() => this.togglePopover('layers')}>${LAYERS_ICON}</button>
+      ${this.popover === 'layers' ? html`
+        <div class="popover map-popover layers-popover">
+          <h3>${t('Map type')}</h3>
+          <div class="layer-choices">
+            ${Object.keys(BASE_LABELS).map(base => html`
+              <button aria-pressed=${this.map.base === base} @click=${() => (this.map.setBase(base), (this.popover = null))}>
+                <img src=${BASE_PREVIEWS[base]} alt=""><span>${t(BASE_LABELS[base])}</span>
+              </button>`)}
+          </div>
+        </div>` : nothing}
     `;
   }
 

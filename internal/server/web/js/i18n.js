@@ -140,6 +140,7 @@ const es = {
   // Map and places
   Map: 'Mapa',
   Satellite: 'Satélite',
+  'Map type': 'Tipo de mapa',
   'Switch to {name}': 'Cambiar a {name}',
   'My places': 'Mis sitios',
   'Sign in to link your Google Maps lists and keep them on every device.':
