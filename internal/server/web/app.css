@@ -245,12 +245,20 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
   border-radius: 50%; border: 0; background: var(--card); color: var(--ink); font-size: 20px;
   box-shadow: 0 2px 10px rgb(0 0 0 / .25); cursor: pointer;
 }
-.toggle { display: none; }
+.grabber { display: none; }
 
 @media (max-width: 720px) {
   .panel { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 55vh; border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .panel.collapsed .body { display: none; }
-  .toggle { display: block; }
+  .panel.tall { max-height: 88vh; }
+  .panel header { padding-top: 18px; }
+  .grabber {
+    display: block; position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 3;
+    width: 120px; height: 20px; cursor: grab; touch-action: none;
+  }
+  .grabber::before {
+    content: ""; position: absolute; top: 7px; left: 42px; width: 36px; height: 5px; border-radius: 3px; background: var(--line);
+  }
   .locate { bottom: auto; top: 12px; left: 12px; right: auto; }
   .places-toggle, .places-popover { top: calc(86px + env(safe-area-inset-top)); }
   .leaflet-top.leaflet-right { top: env(safe-area-inset-top); }

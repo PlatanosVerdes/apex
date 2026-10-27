@@ -46,6 +46,7 @@ export class ApexApp extends LitElement {
     saved: { state: true },
     notice: { state: true },
     collapsed: { state: true },
+    tall: { state: true },
     here: { state: true },
     lists: { state: true },
     hiddenLists: { state: true },
@@ -87,16 +88,37 @@ export class ApexApp extends LitElement {
     this.query = '';
     this.tour = null;
     this.firstVisit = firstVisit;
+    // Read before the address starts following the route.
+    this.signinFailed = new URLSearchParams(location.search).get('signin') === 'failed';
+    this.linked = fromRouteLink(location);
+    // A reload of the page's own address is the draft itself, not a route opened from a link.
+    if (this.linked && toRouteLink(this.route, '') === location.pathname + location.search) this.linked = null;
     this.curves = null; // { left, max, nextIn } curve searches this user has, from the last plan
     this.account = { user: null, signIn: '' }; // who is signed in, and how one can sign in here
     this.insertAt = null; // where a found place goes; null lets it find its best gap
     this.results = [];
     this.active = 0;
+    // Back and Forward, or Ctrl+Z and Ctrl+Shift+Z, step through the route's earlier versions.
+    this.onHistory = e => {
+      if (!e.state?.route) return;
+      this.route = e.state.route;
+      this.dirty = e.state.dirty;
+      this.selected = -1;
+      this.changed({ edited: false });
+      this.nameUnnamed();
+    };
     this.onOutside = e => {
       if (this.popover && !e.target.closest('.popover, .popover-toggle')) this.popover = null;
       if (this.results.length && !e.target.closest('.search')) this.results = [];
     };
     this.onKey = e => {
+      const typing = e.target.closest('input, select, textarea');
+      if ((e.metaKey || e.ctrlKey) && !typing && (e.key.toLowerCase() === 'z' || e.key === 'y')) {
+        e.preventDefault();
+        if (e.shiftKey || e.key === 'y') history.forward();
+        else if (history.state?.step > 0) history.back();
+        return;
+      }
       if (e.key === 'Escape') {
         this.popover = null;
         if (this.tour) this.closeTour();
@@ -117,11 +139,13 @@ export class ApexApp extends LitElement {
     super.connectedCallback();
     document.addEventListener('keydown', this.onKey);
     document.addEventListener('pointerdown', this.onOutside);
+    window.addEventListener('popstate', this.onHistory);
   }
 
   disconnectedCallback() {
     document.removeEventListener('keydown', this.onKey);
     document.removeEventListener('pointerdown', this.onOutside);
+    window.removeEventListener('popstate', this.onHistory);
     super.disconnectedCallback();
   }
 
@@ -139,8 +163,7 @@ export class ApexApp extends LitElement {
     this.changed({ fit: true, edited: false });
     this.requestUpdate(); // The layers panel renders once the map exists.
     this.loadAccount();
-    const linked = fromRouteLink(location);
-    if (linked) this.openLinked(linked);
+    if (this.linked) this.openLinked(this.linked);
     if (this.route.fromHere) this.useMyLocation();
     this.nameUnnamed();
     if (this.firstVisit) setTimeout(() => this.tourTo(0), 600);
@@ -196,12 +219,19 @@ export class ApexApp extends LitElement {
     return { points, avoid: this.route.avoid ?? {}, legs };
   }
 
-  changed({ fit = false, edited = true } = {}) {
+  // record makes the change a step of the browser's history, so Back and Ctrl+Z undo it.
+  changed({ fit = false, edited = true, record = edited } = {}) {
     if (edited) this.dirty = true;
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...this.route, dirty: this.dirty }));
     } catch {}
     this.map.setStops(this.route.stops, this.selected);
+    // The address is always a link to the route on screen, ready to copy and pass on.
+    const address = this.route.stops.length ? toRouteLink(this.route, '') : '/';
+    const step = history.state?.step ?? 0;
+    const same = JSON.stringify(history.state?.route) === JSON.stringify(this.route);
+    if (record && !same) history.pushState({ route: this.route, dirty: this.dirty, step: step + 1 }, '', address);
+    else history.replaceState({ route: this.route, dirty: this.dirty, step }, '', address);
     if (fit) this.map.fit(this.route.stops, this.querySelector('.panel').getBoundingClientRect());
     clearTimeout(this.routeTimer);
     this.routeTimer = setTimeout(() => this.fetchPlan(), 200);
@@ -359,7 +389,7 @@ export class ApexApp extends LitElement {
       if (!this.route.stops.includes(stop)) return;
       const label = { name: place || road, detail: place ? road : '' };
       this.route = { ...this.route, stops: this.route.stops.map(s => (s === stop ? { ...s, ...label } : s)) };
-      this.changed({ edited: this.dirty });
+      this.changed({ edited: this.dirty, record: false });
     } catch {}
   }
 
@@ -593,8 +623,7 @@ export class ApexApp extends LitElement {
     try {
       this.account = await this.api.me();
     } catch {}
-    if (new URLSearchParams(location.search).get('signin') === 'failed') {
-      history.replaceState(null, '', '/');
+    if (this.signinFailed) {
       this.notice = { text: t('Signing in did not work. Try again.'), bad: true };
     }
     if (!this.account.user) return;
@@ -639,7 +668,7 @@ export class ApexApp extends LitElement {
     this.route = route;
     this.selected = -1;
     this.dirty = false;
-    this.changed({ fit: true, edited: false });
+    this.changed({ fit: true, edited: false, record: true });
     if (route.fromHere) this.useMyLocation();
     this.nameUnnamed();
   }
@@ -649,7 +678,7 @@ export class ApexApp extends LitElement {
     this.route = { ...blankRoute(), mode: this.route.mode };
     this.selected = -1;
     this.dirty = false;
-    this.changed({ edited: false });
+    this.changed({ edited: false, record: true });
   }
 
   async remove(route) {
@@ -717,12 +746,11 @@ export class ApexApp extends LitElement {
 
   // openLinked opens a route read from a route link as an unsaved copy.
   openLinked(route) {
-    history.replaceState(null, '', '/');
     if (!this.confirmDiscard()) return;
     this.route = { ...blankRoute(), ...route };
     this.selected = -1;
     this.dirty = true;
-    this.changed({ fit: true });
+    this.changed({ fit: true, record: false });
     this.nameUnnamed();
     if (route.fromHere) this.useMyLocation();
     this.flash(t('Route opened from a link. Save it to keep your own copy.'));
@@ -762,8 +790,9 @@ export class ApexApp extends LitElement {
     return html`
       <div class="map"></div>
       <button class="locate" title=${t('My location')} @click=${() => this.map.locate()}>◎</button>
-      <aside class="panel ${this.collapsed ? 'collapsed' : ''} ${this.planning ? 'planning' : ''}">
+      <aside class="panel ${this.collapsed ? 'collapsed' : ''} ${this.tall ? 'tall' : ''} ${this.planning ? 'planning' : ''}">
         <div class="progress" aria-hidden="true"></div>
+        <div class="grabber" role="button" aria-label=${t(this.collapsed ? 'Show' : 'Hide')} @pointerdown=${e => this.dragSheet(e)}></div>
         <header>
           <input .value=${this.route.name} placeholder=${t('Untitled route')} aria-label=${t('Route name')}
             @change=${e => this.setOption('name', e.target.value)}>
@@ -785,8 +814,6 @@ export class ApexApp extends LitElement {
           ${this.renderAccount()}
           <input class="gpx-file" type="file" accept=".gpx,application/gpx+xml" hidden
             @change=${e => (this.importGPX(e.target.files[0]), (e.target.value = ''))}>
-          <button class="icon toggle" title=${t(this.collapsed ? 'Show' : 'Hide')}
-            @click=${() => (this.collapsed = !this.collapsed)}>${this.collapsed ? '▴' : '▾'}</button>
         </header>
         <div class="body">
           <div class="mode" role="tablist">
@@ -993,6 +1020,44 @@ export class ApexApp extends LitElement {
         ${this.advanced ? html`<p class="hint">${t('Motorways are chosen per leg in advanced mode.')}</p>` : nothing}
       </div>
     `;
+  }
+
+  // dragSheet lets the panel on a phone be pulled down to the header, to half the screen or up to
+  // nearly all of it; a tap folds or unfolds it.
+  dragSheet(e) {
+    const panel = this.querySelector('.panel');
+    const grabber = e.currentTarget;
+    grabber.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    const startHeight = panel.getBoundingClientRect().height;
+    const folded = panel.querySelector('header').offsetHeight + panel.querySelector('.actions').offsetHeight;
+    const top = window.innerHeight * 0.88;
+    let height = startHeight;
+    const move = ev => {
+      if (Math.abs(ev.clientY - startY) < 6 && height === startHeight) return;
+      if (this.collapsed) this.collapsed = false;
+      height = Math.min(Math.max(startHeight - (ev.clientY - startY), folded), top);
+      panel.style.setProperty('height', `${height}px`);
+      panel.style.setProperty('max-height', `${height}px`);
+    };
+    const up = () => {
+      grabber.removeEventListener('pointermove', move);
+      grabber.removeEventListener('pointerup', up);
+      grabber.removeEventListener('pointercancel', up);
+      panel.style.removeProperty('height');
+      panel.style.removeProperty('max-height');
+      if (height === startHeight) {
+        this.collapsed = !this.collapsed;
+        this.tall = false;
+        return;
+      }
+      const half = window.innerHeight * 0.55;
+      this.collapsed = height < (folded + half) / 2;
+      this.tall = !this.collapsed && height > (half + top) / 2;
+    };
+    grabber.addEventListener('pointermove', move);
+    grabber.addEventListener('pointerup', up);
+    grabber.addEventListener('pointercancel', up);
   }
 
   // tourTo moves the guide to a step: it opens what the step shows, then measures it once drawn.
