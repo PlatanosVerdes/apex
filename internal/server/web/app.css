@@ -70,6 +70,8 @@ path.drag-road.twisty { stroke: var(--twisty); }
 .quota-out.planning path.leg { animation-duration: .45s; }
 /* A leg drawn fast for lack of searches keeps beating until it is redone with curves. */
 path.leg.limited { animation: breathe .45s ease-in-out infinite; stroke-dasharray: 10 8; }
+/* Drawn at once by the fast way while the leg's curves are still being looked for. */
+path.leg.provisional { stroke-dasharray: 2 9; stroke-linecap: round; animation: breathe 1s ease-in-out infinite; }
 .moving-stop path.leg { stroke-opacity: .25; }
 path.via { fill: #fff; fill-opacity: 1; stroke: #374151; stroke-width: 2; }
 path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; }
@@ -80,6 +82,15 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 }
 .stop-pin.first, .stop-pin.last { background: var(--accent); color: #fff; border-color: #fff; }
 .stop-pin.selected { outline: 3px solid var(--accent); outline-offset: 2px; }
+.map-menu-popup .leaflet-popup-content-wrapper { background: var(--card); color: var(--ink); border-radius: 10px; padding: 0; }
+.map-menu-popup .leaflet-popup-tip { background: var(--card); }
+.map-menu-popup .leaflet-popup-content { margin: 4px; }
+.map-menu { display: flex; flex-direction: column; min-width: 170px; font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.map-menu button {
+  font: inherit; font-size: 14px; color: inherit; text-align: left; background: none; border: 0;
+  border-radius: 7px; padding: 8px 10px; cursor: pointer;
+}
+.map-menu button:hover, .map-menu button:focus-visible { background: var(--soft); outline: none; }
 
 .panel {
   position: absolute; z-index: 1000; top: 12px; left: 12px; bottom: 12px; width: 360px;
@@ -443,10 +454,24 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .panel header .saved-mark { color: var(--muted); cursor: default; }
 .panel header .saved-mark:hover { background: none; }
 
-.legs-trial {
-  position: absolute; z-index: 1001; top: 12px; left: 50%; transform: translateX(-50%); margin-left: 186px;
-  display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--card); box-shadow: 0 2px 12px rgb(0 0 0 / .3);
+/* The guide: a dark veil with a hole around what each step shows, and a bubble beside it. */
+.tour { position: fixed; inset: 0; z-index: 3000; }
+.tour-shade { position: absolute; inset: 0; background: rgb(0 0 0 / .55); }
+.tour-hole {
+  position: absolute; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / .55), 0 0 0 2px var(--accent);
+  transition: left .25s, top .25s, width .25s, height .25s;
 }
-.legs-trial button { white-space: nowrap; font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
-.legs-trial button[aria-pressed="true"] { background: var(--soft); color: var(--ink); }
-@media (max-width: 720px) {
+.tour-bubble {
+  position: absolute; padding: 16px 16px 12px; border-radius: 14px; background: var(--card); color: var(--ink);
+  box-shadow: 0 12px 40px rgb(0 0 0 / .4); transition: left .25s, top .25s;
+}
+.tour-count { color: var(--muted); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tour-bubble h2 { margin: 4px 0 6px; font-size: 17px; }
+.tour-bubble p { margin: 0 0 14px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+.tour-buttons { display: flex; align-items: center; gap: 8px; }
+.tour-buttons .btn { padding: 7px 14px; font-size: 14px; }
+.tour-buttons .btn.primary { flex: none; }
+.tour-skip { margin-right: auto; padding: 6px 4px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.tour-skip:hover { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .tour-hole, .tour-bubble { transition: none; } }

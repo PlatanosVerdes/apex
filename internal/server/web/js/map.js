@@ -58,8 +58,8 @@ function storedBase(layers) {
 
 // RouteMap owns the Leaflet map; the app tells it what to draw and hears back what the rider did.
 export class RouteMap {
-  constructor(element, { add, insert, move, select, preview, neighbours }) {
-    this.handlers = { add, insert, move, select, preview, neighbours };
+  constructor(element, { add, insert, move, select, remove, copy, preview, neighbours }) {
+    this.handlers = { add, insert, move, select, remove, copy, preview, neighbours };
     this.map = L.map(element, { zoomControl: false }).setView([39.62, 2.95], 9);
     L.control.zoom({ position: 'topright' }).addTo(this.map);
     this.bases = baseLayers();
@@ -69,7 +69,29 @@ export class RouteMap {
     this.lines = L.layerGroup().addTo(this.map);
     this.pins = L.layerGroup().addTo(this.map);
     this.markers = [];
-    this.map.on('click', e => this.dragging || this.handlers.add(point(e.latlng)));
+    // A click that only closes the menu must not also add a stop.
+    this.map.on('click', e => this.dragging || Date.now() - this.menuClosed < 400 || this.handlers.add(point(e.latlng)));
+    this.map.on('contextmenu', e =>
+      this.menu(e.latlng, [
+        [t('Add a stop here'), () => this.handlers.add(point(e.latlng))],
+        [t('Copy coordinates'), () => this.handlers.copy(point(e.latlng))],
+      ]),
+    );
+  }
+
+  // menu opens what a right click, or a long press on a phone, offers at latlng.
+  menu(latlng, items) {
+    const list = document.createElement('div');
+    list.className = 'map-menu';
+    const popup = L.popup({ closeButton: false, className: 'map-menu-popup', offset: [0, -8] });
+    for (const [label, run] of items) {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.addEventListener('click', () => (this.map.closePopup(popup), run()));
+      list.append(button);
+    }
+    popup.on('remove', () => (this.menuClosed = Date.now()));
+    popup.setLatLng(latlng).setContent(list).openOn(this.map);
   }
 
   setStops(stops, selected) {
@@ -99,6 +121,13 @@ export class RouteMap {
         this.handlers.move(i, point(marker.getLatLng()));
       });
       marker.on('click', () => this.handlers.select(i));
+      marker.on('contextmenu', e => {
+        L.DomEvent.stop(e);
+        this.menu(marker.getLatLng(), [
+          [t('Remove'), () => this.handlers.remove(i)],
+          [t('Copy coordinates'), () => this.handlers.copy(s)],
+        ]);
+      });
       return marker.addTo(this.pins);
     });
   }
@@ -143,7 +172,7 @@ export class RouteMap {
   setLegs(legs, styles) {
     this.lines.clearLayers();
     legs.forEach((leg, i) => {
-      const line = L.polyline(leg.path, { className: `leg ${styles[i] ?? 'fast'} ${leg.limited ? 'limited' : ''}`, weight: 5, bubblingMouseEvents: false });
+      const line = L.polyline(leg.path, { className: `leg ${styles[i] ?? 'fast'} ${leg.limited ? 'limited' : ''} ${leg.provisional ? 'provisional' : ''}`, weight: 5, bubblingMouseEvents: false });
       line.on('click', e => {
         L.DomEvent.stop(e);
         if (!this.dragging) this.handlers.insert(i, point(e.latlng));
@@ -246,12 +275,13 @@ export class RouteMap {
   }
 
   // covered is the panel's rectangle, kept clear so no stop ends up under it.
-  fit(stops, covered) {
+  // top keeps that many pixels clear above the route, for something drawn over the map there.
+  fit(stops, covered, top = 40) {
     if (stops.length === 0) return;
     const size = this.map.getSize();
     const beside = covered.width < size.x / 2;
     const options = {
-      paddingTopLeft: [beside ? covered.right + 40 : 40, 40],
+      paddingTopLeft: [beside ? covered.right + 40 : 40, top],
       paddingBottomRight: [40, beside ? 40 : size.y - covered.top + 40],
       maxZoom: 12,
     };

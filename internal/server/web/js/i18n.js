@@ -103,6 +103,9 @@ const es = {
   'Google Maps link': 'Enlace de Google Maps',
   'To navigate with the phone': 'Para navegar con el móvil',
   '{what} copied': '{what} copiado',
+  'Coordinates copied': 'Coordenadas copiadas',
+  'Copy coordinates': 'Copiar coordenadas',
+  'Add a stop here': 'Añadir una parada aquí',
   Link: 'Enlace',
   'Copy the link': 'Copia el enlace',
   'Apex route': 'Ruta de Apex',
@@ -160,6 +163,34 @@ const es = {
   'Could not change the colour: {err}': 'No se ha podido cambiar el color: {err}',
   'Your Google lists are unavailable: {err}': 'Tus listas de Google no están disponibles: {err}',
   'Add to route': 'Añadir a la ruta',
+  // Guide
+  'How it works': 'Cómo funciona',
+  'Draw your route': 'Dibuja tu ruta',
+  'Find a place': 'Busca un sitio',
+  'Search a town, a pass or one of your places. The + on a leg puts it between two stops.':
+    'Busca un pueblo, un puerto o uno de tus sitios. El + de un tramo lo mete entre dos paradas.',
+  'Ride each leg your way': 'Cada tramo a tu manera',
+  'In Advanced, choose each leg: fast, curvy or twisty. Tap the dot next to each kind to pick its colour.':
+    'En Avanzado eliges cada tramo: rápida, curvas o muchas curvas. Toca el punto de cada tipo para cambiar su color.',
+  'Your places': 'Tus sitios',
+  'Paste a Google Maps list and its places show on the map, ready to add to a route.':
+    'Pega una lista de Google Maps y sus sitios salen en el mapa, listos para añadirlos a una ruta.',
+  'Keep your routes': 'Guarda tus rutas',
+  'Sign in with Google and save your routes: they follow you between the phone and the computer.':
+    'Inicia sesión con Google y guarda tus rutas: te siguen del móvil al ordenador.',
+  'Ride it': 'A rodar',
+  'Open the route in Google Maps to navigate with the phone, or share it with the button beside it.':
+    'Abre la ruta en Google Maps para navegar con el móvil, o compártela con el botón de al lado.',
+  Next: 'Siguiente',
+  Back: 'Atrás',
+  Skip: 'Saltar',
+  Close: 'Cerrar',
+  'Start riding': 'Empezar',
+  'Your stops': 'Tus paradas',
+  'Each stop you add shows here with its number. Drag it on the map to move it, drag ⠿ to change the order, and ✕ takes it away.':
+    'Cada parada que añadas sale aquí con su número. Arrástrala en el mapa para moverla, arrastra ⠿ para cambiar el orden, y la ✕ la quita.',
+  'Click the map to add stops. Drag the line to take other roads; the route redraws along them as you go.':
+    'Haz clic en el mapa para añadir paradas. Arrastra la línea para ir por otras carreteras; la ruta se redibuja por ellas mientras la mueves.',
   'Google Maps will list {n} stops; links have been tested up to {max}.': 'Google Maps mostrará {n} paradas; los enlaces se han probado hasta {max}.',
   'No way around it: the route still uses {what}.': 'No hay otra forma: la ruta sigue usando {what}.',
   ' and ': ' y ',

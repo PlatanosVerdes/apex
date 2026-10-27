@@ -5,6 +5,7 @@ import { coords, curves, duration, km, shortDuration } from '../format.js';
 import { lang, plural, t } from '../i18n.js';
 import { fromGPX, toGPX } from '../gpx.js';
 import { fromRouteLink, toRouteLink } from '../routelink.js';
+import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../tour.js';
 
 const DRAFT_KEY = 'apex.draft';
 const HIDDEN_KEY = 'apex.hiddenLists';
@@ -54,6 +55,7 @@ export class ApexApp extends LitElement {
     pickingColour: { state: true },
     colourEdit: { state: true },
     query: { state: true },
+    tour: { state: true },
     curves: { state: true },
     account: { state: true },
     insertAt: { state: true },
@@ -64,6 +66,7 @@ export class ApexApp extends LitElement {
   constructor(api) {
     super();
     this.api = api;
+    const firstVisit = !tourSeen() && !location.pathname.startsWith('/r/');
     const { dirty = false, ...route } = loadDraft() ?? blankRoute();
     this.route = route;
     this.plan = null;
@@ -82,6 +85,8 @@ export class ApexApp extends LitElement {
     this.pickingColour = null;
     this.colourEdit = null; // the leg kind whose colour strip is open in a leg menu
     this.query = '';
+    this.tour = null;
+    this.firstVisit = firstVisit;
     this.curves = null; // { left, max, nextIn } curve searches this user has, from the last plan
     this.account = { user: null, signIn: '' }; // who is signed in, and how one can sign in here
     this.insertAt = null; // where a found place goes; null lets it find its best gap
@@ -92,7 +97,10 @@ export class ApexApp extends LitElement {
       if (this.results.length && !e.target.closest('.search')) this.results = [];
     };
     this.onKey = e => {
-      if (e.key === 'Escape') this.popover = null;
+      if (e.key === 'Escape') {
+        this.popover = null;
+        if (this.tour) this.closeTour();
+      }
       if (this.selected < 0 || e.target.closest('input, select')) return;
       if (e.key === 'Delete' || e.key === 'Backspace') this.removeStop(this.selected);
       if (e.altKey && e.key === 'ArrowUp' && this.selected > 0) this.shiftStop(this.selected, -1);
@@ -123,6 +131,8 @@ export class ApexApp extends LitElement {
       insert: (leg, p) => this.addStop(p, leg + 1 - this.offset),
       move: (i, p) => this.relocateStop(i, p),
       select: i => this.select(i),
+      remove: i => this.removeStop(i),
+      copy: p => this.copy(`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`, t('Coordinates copied')),
       neighbours: i => this.neighbours(i),
       preview: (points, signal) => this.api.plan({ points: points.map(p => [p.lat, p.lng]), avoid: this.route.avoid ?? {}, legs: null }, signal),
     });
@@ -133,6 +143,8 @@ export class ApexApp extends LitElement {
     if (linked) this.openLinked(linked);
     if (this.route.fromHere) this.useMyLocation();
     this.nameUnnamed();
+    if (this.firstVisit) setTimeout(() => this.tourTo(0), 600);
+    window.addEventListener('resize', () => this.tour && this.tourTo(this.tour.step));
     this.sortable = window.Sortable.create(this.querySelector('.stops'), {
       handle: '.grip',
       draggable: 'li.item',
@@ -210,11 +222,14 @@ export class ApexApp extends LitElement {
     const pending = (this.pending = new AbortController());
     this.planning = true;
     this.map.setPending(true);
+    if (request.legs) this.drawProvisional(request, pending.signal);
     try {
       this.plan = await this.api.plan(request, pending.signal);
       this.planKey = key;
       this.trackCurves(this.plan);
-      this.map.setLegs(this.plan.legs, request.legs?.map(l => l.style) ?? []);
+      const styles = request.legs?.map(l => l.style) ?? [];
+      this.map.setLegs(this.plan.legs, styles);
+      this.lastDrawn = { points: request.points, legs: this.plan.legs, styles };
       if (this.notice?.planning) this.notice = null;
     } catch (err) {
       if (err.name !== 'AbortError') this.notice = { text: t('Could not draw the route: {err}', { err: err.message }), bad: true, planning: true };
@@ -224,6 +239,26 @@ export class ApexApp extends LitElement {
         this.map.setPending(false);
       }
     }
+  }
+
+  // drawProvisional draws at once, with one fast call, the legs the last plan does not have yet (a
+  // stop added or moved), next to the legs that did not change, while the full plan, curves and
+  // hidden stops included, is still being worked out.
+  async drawProvisional(request, signal) {
+    const known = new Map();
+    const last = this.lastDrawn;
+    if (last) last.points.slice(1).forEach((p, i) => known.set(JSON.stringify([last.points[i], p]), { leg: last.legs[i], style: last.styles[i] }));
+    const pairs = request.points.slice(1).map((p, i) => [request.points[i], p]);
+    const fresh = pairs.map(pair => !known.has(JSON.stringify(pair)));
+    if (!fresh.some(Boolean)) return;
+    try {
+      const quick = await this.api.plan({ points: request.points, avoid: request.avoid, legs: null }, signal);
+      // The full plan may have come back first; the quick one must not draw over it.
+      if (signal.aborted || !this.planning || this.pending?.signal !== signal) return;
+      const legs = pairs.map((pair, i) => (fresh[i] ? { ...quick.legs[i], provisional: true } : known.get(JSON.stringify(pair)).leg));
+      const styles = pairs.map((pair, i) => (fresh[i] ? request.legs[i].style : known.get(JSON.stringify(pair)).style));
+      this.map.setLegs(legs, styles);
+    } catch {}
   }
 
   // trackCurves keeps the curve-search counter current and, when a leg had to be drawn fast for
@@ -664,10 +699,10 @@ export class ApexApp extends LitElement {
     }
   }
 
-  async copy(text, what) {
+  async copy(text, done) {
     try {
       await navigator.clipboard.writeText(text);
-      this.flash(t('{what} copied', { what }));
+      this.flash(done);
     } catch {
       // The clipboard API needs a secure origin; plain http over Tailscale is not one.
       prompt(t('Copy the link'), text);
@@ -699,12 +734,12 @@ export class ApexApp extends LitElement {
       <div class="popover share-popover">
         <div class="share-row">
           <span class="share-label"><b>${t('Link to this route')}</b><small>${apex.replace(/^https?:\/\//, '')}</small></span>
-          <button class="btn" @click=${() => this.copy(apex, t('Link'))}>${t('Copy')}</button>
+          <button class="btn" @click=${() => this.copy(apex, t('{what} copied', { what: t('Link') }))}>${t('Copy')}</button>
           ${'share' in navigator ? html`<button class="btn" @click=${() => this.shareRouteLink(apex)}>${t('Share')}</button>` : nothing}
         </div>
         <div class="share-row">
           <span class="share-label"><b>${t('Google Maps link')}</b><small>${t('To navigate with the phone')}</small></span>
-          <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, t('Google Maps link'))}>${t('Copy')}</button>
+          <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, t('{what} copied', { what: t('Google Maps link') }))}>${t('Copy')}</button>
         </div>
       </div>
     `;
@@ -742,6 +777,7 @@ export class ApexApp extends LitElement {
             ${this.popover === 'more' ? html`
               <div class="popover more-menu" role="menu">
                 <button role="menuitem" @click=${() => ((this.popover = null), this.startNew())}>${t('New route')}</button>
+                <button role="menuitem" @click=${() => this.tourTo(0)}>${t('How it works')}</button>
                 <button role="menuitem" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import GPX…')}</button>
                 <button role="menuitem" ?disabled=${stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export GPX')}</button>
               </div>` : nothing}
@@ -804,6 +840,11 @@ export class ApexApp extends LitElement {
       </aside>
       ${this.map ? this.renderLayers() : nothing}
       ${this.map ? this.renderBasemap() : nothing}
+      ${this.tour ? renderTour(this.tour.step, this.tour.rect, {
+        next: () => this.tourTo(this.tour.step + 1),
+        back: () => this.tourTo(this.tour.step - 1),
+        close: () => this.closeTour(),
+      }) : nothing}
     `;
   }
 
@@ -952,6 +993,59 @@ export class ApexApp extends LitElement {
         ${this.advanced ? html`<p class="hint">${t('Motorways are chosen per leg in advanced mode.')}</p>` : nothing}
       </div>
     `;
+  }
+
+  // tourTo moves the guide to a step: it opens what the step shows, then measures it once drawn.
+  async tourTo(step) {
+    if (step < 0 || step >= STEPS.length) return this.closeTour();
+    const s = STEPS[step];
+    this.popover = null;
+    this.collapsed = false;
+    if (s.advanced && !this.advanced) this.setMode('advanced');
+    await this.updateComplete;
+    let r;
+    if (s.target === 'route') {
+      // The whole line, not just the stops: a twisty leg can wander well past them.
+      const line = (this.plan?.legs ?? []).flatMap(l => l.path).map(([lat, lng]) => ({ lat, lng }));
+      // On a wide screen the bubble goes over the top of the map, so the route keeps clear of it; on
+      // a phone it sits below the route, over the panel.
+      const top = window.innerWidth > 720 ? 240 : 40;
+      this.map.fit(line.length ? line : this.route.stops, this.querySelector('.panel').getBoundingClientRect(), top);
+      await new Promise(done => setTimeout(done, 450));
+      // The drawn route itself: the box around every leg on screen.
+      const boxes = [...this.querySelectorAll('path.leg')].map(p => p.getBoundingClientRect()).filter(b => b.width > 0);
+      if (boxes.length) {
+        const left = Math.min(...boxes.map(b => b.left));
+        const top = Math.min(...boxes.map(b => b.top));
+        r = { left, top, width: Math.max(...boxes.map(b => b.right)) - left, height: Math.max(...boxes.map(b => b.bottom)) - top };
+        r.right = r.left + r.width;
+        r.bottom = r.top + r.height;
+      } else {
+        // Nothing drawn yet: the open map beside or above the panel, where the clicks go.
+        const panel = this.querySelector('.panel').getBoundingClientRect();
+        const beside = panel.width < window.innerWidth / 2;
+        r = beside
+          ? { left: panel.right + 16, top: 16, right: window.innerWidth - 16, bottom: window.innerHeight - 16 }
+          : { left: 16, top: 16, right: window.innerWidth - 16, bottom: panel.top - 16 };
+        r.width = r.right - r.left;
+        r.height = r.bottom - r.top;
+      }
+    } else {
+      const target = s.target.split(',').map(q => this.querySelector(q.trim())).find(Boolean);
+      target?.scrollIntoView?.({ block: 'nearest' });
+      r = target?.getBoundingClientRect();
+    }
+    const rect = r && r.width > 0 ? clip(r) : null;
+    this.tour = { step, rect };
+  }
+
+  closeTour() {
+    this.tour = null;
+    markTourSeen();
+  }
+
+  updated() {
+    if (this.tour) placeBoxes(this);
   }
 
   // neighbours are the points joined to stop i by a leg: the stop or position before it and the one after,
@@ -1156,4 +1250,13 @@ darkScheme.addEventListener('change', applyLegColours);
 // fold lower-cases and drops accents, so "soller" finds Sóller.
 function fold(s) {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+// clip keeps a highlighted box on screen: the map's route layer can reach far past the edges.
+function clip(r) {
+  const left = Math.max(r.left, 8);
+  const top = Math.max(r.top, 8);
+  const right = Math.min(r.right, window.innerWidth - 8);
+  const bottom = Math.min(r.bottom, window.innerHeight - 8);
+  return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 }
