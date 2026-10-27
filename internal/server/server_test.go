@@ -410,7 +410,7 @@ func TestAssetsCompressedAndCached(t *testing.T) {
 	if again := get("/", "If-None-Match", etag); again.StatusCode != http.StatusNotModified {
 		t.Errorf("an unchanged page must answer 304, got %d", again.StatusCode)
 	}
-	if missing := get("/nothing.js"); missing.StatusCode != http.StatusNotFound {
+	if missing := get("/nothing.js"); missing.StatusCode != http.StatusNotFound || missing.Header.Get("Cache-Control") != "no-store" {
 		t.Errorf("missing file: %d", missing.StatusCode)
 	}
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/plan", strings.NewReader(`{"points":[[39.57,2.65],[39.7,2.7]]}`))

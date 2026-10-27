@@ -77,6 +77,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		a, ok := files[name]
 		if !ok {
+			// Cloudflare would otherwise keep the 404 for hours, past the deploy that adds the file.
+			w.Header().Set("Cache-Control", "no-store")
 			http.NotFound(w, r)
 			return
 		}

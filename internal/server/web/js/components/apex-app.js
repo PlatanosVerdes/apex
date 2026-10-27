@@ -5,7 +5,7 @@ import { coords, curves, duration, km, shortDuration } from '../format.js';
 import { lang, plural, t } from '../i18n.js';
 import { fromGPX, toGPX } from '../gpx.js';
 import { fromRouteLink, toRouteLink } from '../routelink.js';
-import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../tour.js';
+import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../guide.js';
 
 const DRAFT_KEY = 'apex.draft';
 const HIDDEN_KEY = 'apex.hiddenLists';
