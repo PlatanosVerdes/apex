@@ -452,6 +452,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .panel header .save, .panel header .saved-mark { display: grid; place-items: center; }
 .panel header .save { color: var(--ink); }
 .panel header .saved-mark { color: var(--muted); cursor: default; }
+.panel header .save:disabled { visibility: visible; opacity: .45; cursor: default; background: none; }
 .panel header .saved-mark:hover { background: none; }
 
 /* The guide: a dark veil with a hole around what each step shows, and a bubble beside it. */

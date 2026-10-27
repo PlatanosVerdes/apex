@@ -1031,9 +1031,17 @@ export class ApexApp extends LitElement {
         r.height = r.bottom - r.top;
       }
     } else {
-      const target = s.target.split(',').map(q => this.querySelector(q.trim())).find(Boolean);
-      target?.scrollIntoView?.({ block: 'nearest' });
-      r = target?.getBoundingClientRect();
+      // Every part the step names, as one box: saving goes with signing in.
+      const targets = s.target.split(',').map(q => this.querySelector(q.trim())).filter(Boolean);
+      targets[0]?.scrollIntoView?.({ block: 'nearest' });
+      const boxes = targets.map(el => el.getBoundingClientRect()).filter(b => b.width > 0);
+      if (boxes.length) {
+        const left = Math.min(...boxes.map(b => b.left));
+        const top = Math.min(...boxes.map(b => b.top));
+        r = { left, top, right: Math.max(...boxes.map(b => b.right)), bottom: Math.max(...boxes.map(b => b.bottom)) };
+        r.width = r.right - r.left;
+        r.height = r.bottom - r.top;
+      }
     }
     const rect = r && r.width > 0 ? clip(r) : null;
     this.tour = { step, rect };
