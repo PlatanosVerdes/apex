@@ -74,6 +74,8 @@ const es = {
   Reverse: 'Invertir',
   '{name} added as stop {n}': '{name} añadida como parada {n}',
   'Location not allowed, so the route starts at stop 1.': 'Sin permiso de ubicación: la ruta sale desde la parada 1.',
+  'Location not allowed. Allow it in the browser settings.': 'Sin permiso de ubicación. Actívalo en los ajustes del navegador.',
+  'Could not find your location.': 'No se ha podido obtener tu ubicación.',
 
   // Search
   'Search a place': 'Buscar un sitio',

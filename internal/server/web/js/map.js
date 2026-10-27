@@ -292,8 +292,14 @@ export class RouteMap {
     this.map.panTo([stop.lat, stop.lng]);
   }
 
-  locate() {
-    this.map.locate({ setView: true, maxZoom: 12 });
+  // showPosition marks p and centres it in the part of the map the panel leaves free.
+  showPosition(p, covered) {
+    this.setHere(p);
+    const size = this.map.getSize();
+    const zoom = Math.max(this.map.getZoom(), 13);
+    const beside = covered.width < size.x / 2;
+    const shift = beside ? L.point(-covered.right / 2, 0) : L.point(0, (size.y - covered.top) / 2);
+    this.map.setView(this.map.unproject(this.map.project([p.lat, p.lng], zoom).add(shift), zoom), zoom);
   }
 }
 

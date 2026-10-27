@@ -259,7 +259,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
   .grabber::before {
     content: ""; position: absolute; top: 7px; left: 42px; width: 36px; height: 5px; border-radius: 3px; background: var(--line);
   }
-  .locate { bottom: auto; top: 12px; left: 12px; right: auto; }
+  .locate { bottom: calc(var(--sheet, 0px) + 12px); right: 12px; }
   .places-toggle, .places-popover { top: calc(86px + env(safe-area-inset-top)); }
   .leaflet-top.leaflet-right { top: env(safe-area-inset-top); }
 }
@@ -368,7 +368,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 
 /* After the desktop rules above, so these win on phones. */
 @media (max-width: 720px) {
-  .basemap { left: 12px; bottom: auto; top: calc(64px + env(safe-area-inset-top)); }
+  .basemap { left: 12px; bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
   .basemap img { width: 52px; height: 52px; }
 }
 

@@ -168,6 +168,8 @@ export class ApexApp extends LitElement {
     this.nameUnnamed();
     if (this.firstVisit) setTimeout(() => this.tourTo(0), 600);
     window.addEventListener('resize', () => this.tour && this.tourTo(this.tour.step));
+    // The locate button rides just above the panel on a phone, however far it is pulled.
+    new ResizeObserver(([entry]) => this.style.setProperty('--sheet', `${entry.borderBoxSize[0].blockSize}px`)).observe(this.querySelector('.panel'));
     this.sortable = window.Sortable.create(this.querySelector('.stops'), {
       handle: '.grip',
       draggable: 'li.item',
@@ -424,6 +426,21 @@ export class ApexApp extends LitElement {
       if (this.route.fromHere) this.setOption('fromHere', false);
       this.notice = { text: t('Location not allowed, so the route starts at stop 1.'), bad: true };
     }
+  }
+
+  locateMe() {
+    const failed = err =>
+      (this.notice = { text: t(err?.code === 1 ? 'Location not allowed. Allow it in the browser settings.' : 'Could not find your location.'), bad: true });
+    if (!navigator.geolocation) return failed();
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const p = { lat: coords.latitude, lng: coords.longitude };
+        if (this.route.fromHere) this.setHere(p);
+        this.map.showPosition(p, this.querySelector('.panel').getBoundingClientRect());
+      },
+      failed,
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
+    );
   }
 
   setHere(here) {
@@ -789,7 +806,7 @@ export class ApexApp extends LitElement {
 
     return html`
       <div class="map"></div>
-      <button class="locate" title=${t('My location')} @click=${() => this.map.locate()}>◎</button>
+      <button class="locate" title=${t('My location')} @click=${() => this.locateMe()}>◎</button>
       <aside class="panel ${this.collapsed ? 'collapsed' : ''} ${this.tall ? 'tall' : ''} ${this.planning ? 'planning' : ''}">
         <div class="progress" aria-hidden="true"></div>
         <div class="grabber" role="button" aria-label=${t(this.collapsed ? 'Show' : 'Hide')} @pointerdown=${e => this.dragSheet(e)}></div>
