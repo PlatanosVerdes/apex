@@ -123,11 +123,11 @@ const es = {
   'Could not import {file}: {err}': 'No se ha podido importar {file}: {err}',
 
   // Account
-  'Sign in': 'Entrar',
-  'Sign out': 'Salir',
+  'Sign in': 'Iniciar sesión',
+  'Sign out': 'Cerrar sesión',
   'Signed out': 'Sesión cerrada',
   Account: 'Cuenta',
-  'Signing in did not work. Try again.': 'No se ha podido entrar. Inténtalo de nuevo.',
+  'Signing in did not work. Try again.': 'No se ha podido iniciar sesión. Inténtalo de nuevo.',
   'Test riders (development only)': 'Usuarios de prueba (solo desarrollo)',
   'Rider A': 'Usuario A',
   'Rider B': 'Usuario B',
@@ -138,7 +138,7 @@ const es = {
   'Switch to {name}': 'Cambiar a {name}',
   'My places': 'Mis sitios',
   'Sign in to link your Google Maps lists and keep them on every device.':
-    'Entra para vincular tus listas de Google Maps y tenerlas en todos tus dispositivos.',
+    'Inicia sesión para vincular tus listas de Google Maps y tenerlas en todos tus dispositivos.',
   'Show on the map': 'Mostrar en el mapa',
   'Hide from the map': 'Ocultar del mapa',
   Colour: 'Color',
