@@ -968,7 +968,10 @@ export class ApexApp extends LitElement {
     if (!donate) return;
     const seen = donateSeen();
     const now = Date.now();
-    if (seen.activeSeconds < (seen.dueSeconds || donate.firstSeconds) || now - seen.shownAt < donate.gapSeconds * 1000) return;
+    // A rider who said "Not now" a whole round in a row rests before the waits start over.
+    const resting = seen.declined > 0 && seen.declined % donate.rounds === 0;
+    const gap = Math.max(donate.gapSeconds, resting ? donate.restSeconds : 0);
+    if (seen.activeSeconds < (seen.dueSeconds || donate.firstSeconds) || now - seen.shownAt < gap * 1000) return;
     this.keepDonate({ ...seen, shownAt: now }, true);
     const show = () => {
       this.popover = null;
@@ -1014,11 +1017,15 @@ export class ApexApp extends LitElement {
       this.api.donateEvent(event);
       const donate = this.account.donate;
       const seen = donateSeen();
+      // declined only grows, so a browser and the server can merge it by taking the larger; a round
+      // is every `rounds` of it, and following the link closes the current one.
       if (event === 'clicked') {
-        this.keepDonate({ ...seen, declined: 0, dueSeconds: seen.activeSeconds + donate.thanksSeconds }, true);
+        const declined = (Math.floor(seen.declined / donate.rounds) + 1) * donate.rounds;
+        this.keepDonate({ ...seen, declined, dueSeconds: seen.activeSeconds + donate.thanksSeconds }, true);
       } else {
         const declined = seen.declined + 1;
-        const wait = Math.min(donate.laterSeconds * 2 ** (declined - 1), donate.mostSeconds);
+        const step = declined % donate.rounds;
+        const wait = step === 0 ? donate.firstSeconds : Math.min(donate.laterSeconds * 2 ** (step - 1), donate.mostSeconds);
         this.keepDonate({ ...seen, declined, dueSeconds: seen.activeSeconds + wait }, true);
       }
     };
