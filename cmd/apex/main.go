@@ -79,6 +79,7 @@ func run() error {
 		}
 		google = auth.NewGoogle(clientID, env("APEX_GOOGLE_CLIENT_SECRET", ""), strings.TrimRight(publicURL, "/")+"/auth/callback", sessions)
 	}
+	googleMaps := gmaps.New()
 	s := &server.Server{
 		Search:   photon.New(photonURL, userAgent),
 		Users:    users,
@@ -90,7 +91,8 @@ func run() error {
 		LegacyDir:      dataDir,
 		ClientIPHeader: env("APEX_CLIENT_IP_HEADER", ""),
 		Public:         limit.New(number("APEX_PUBLIC_REQUESTS", 120), duration("APEX_PUBLIC_REFILL", 500*time.Millisecond)),
-		ListSource:     gmaps.New(),
+		ListSource:     googleMaps,
+		RouteLinks:     googleMaps,
 		Planner:        &plan.Planner{Router: valhalla.New(routerURL, userAgent), Parallel: 3},
 		// A curve search costs the public routing server five to ten requests; a fast leg costs one.
 		Curves:  limit.New(number("APEX_CURVE_SEARCHES", 20), duration("APEX_CURVE_REFILL", 30*time.Second)),

@@ -64,6 +64,13 @@ func (fakeSource) Resolve(_ context.Context, link string) (string, error) {
 	return "LIST_ID", nil
 }
 
+func (fakeSource) ResolveRoute(_ context.Context, link string) (string, error) {
+	if link == "https://maps.app.goo.gl/route" {
+		return "https://www.google.com/maps/dir/Mi+ubicaci%C3%B3n/Viladrau/41.80,2.34/data=!4m6!4m5!2m3!1b1!2b0!3b1!3e0", nil
+	}
+	return link, nil
+}
+
 func (fakeSource) Fetch(context.Context, string) (gmaps.List, error) {
 	return gmaps.List{ID: "LIST_ID", Name: "Ruta moto", Places: []gmaps.Place{{Name: "Pedraforca", Lat: 42.24, Lng: 1.71}}}, nil
 }
@@ -80,7 +87,7 @@ func newServerWith(t *testing.T, tune func(*Server)) (*httptest.Server, *fakePla
 	}
 	sessions, _ := auth.OpenSessions(t.TempDir(), false)
 	planner := &fakePlanner{}
-	s := &Server{Search: fakeSearch{}, Users: users, Sessions: sessions, DevLogin: true, ListSource: fakeSource{},
+	s := &Server{Search: fakeSearch{}, Users: users, Sessions: sessions, DevLogin: true, ListSource: fakeSource{}, RouteLinks: fakeSource{},
 		Planner: planner, Places: fakePlaces{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if tune != nil {
 		tune(s)
@@ -485,5 +492,24 @@ func TestDonateStateFollowsTheRider(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&got)
 	if got != (store.DonateState{}) {
 		t.Errorf("rider b sees rider a's state: %+v", got)
+	}
+}
+
+func TestImportRoute(t *testing.T) {
+	srv, _ := newServer(t)
+	resp := do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/import", `{"url":"https://maps.app.goo.gl/route"}`)
+	var got struct {
+		Stops    []importedStop
+		FromHere bool
+		Avoid    map[string]bool
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	// Viladrau is only named in the link: it is searched for near the pinned stop and flagged.
+	if resp.StatusCode != 200 || !got.FromHere || len(got.Stops) != 2 || !got.Stops[0].Approx || got.Stops[0].Name != "Viladrau" ||
+		got.Stops[1].Approx || got.Stops[1].Lat != 41.80 || !got.Avoid["highways"] || got.Avoid["tolls"] || !got.Avoid["ferries"] {
+		t.Fatalf("%d %+v", resp.StatusCode, got)
+	}
+	if resp := do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/import", `{"url":"https://www.google.com/maps/place/Viladrau"}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a place is not a route: %d", resp.StatusCode)
 	}
 }

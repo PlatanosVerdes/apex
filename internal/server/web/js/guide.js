@@ -7,7 +7,7 @@ const SEEN_KEY = 'apex.tourSeen';
 export const STEPS = [
   { target: 'route', title: 'Draw your route', text: 'Click the map to add stops. Drag the line to take other roads; the route redraws along them as you go.' },
   { target: '.stops', title: 'Your stops', text: 'Each stop you add shows here with its number. Drag it on the map to move it, drag ⠿ to change the order, and ✕ takes it away.' },
-  { target: '.search', title: 'Find a place', text: 'Search a town, a pass or one of your places. The + on a leg puts it between two stops.' },
+  { target: '.search', title: 'Find a place', text: 'Search a town, a pass or one of your places; the + on a leg puts it between two stops. Paste a route shared from Google Maps and it comes over whole.' },
   { target: '.mode', title: 'Ride each leg your way', text: 'In Advanced, choose each leg: fast, curvy or twisty. Tap the dot next to each kind to pick its colour.', advanced: true },
   { target: '.places-toggle', title: 'Your places', text: 'Paste a Google Maps list and its places show on the map, ready to add to a route.' },
   { target: '.panel header .save, .panel header .saved-mark, .panel header .account', title: 'Keep your routes', text: 'Sign in with Google and save your routes: they follow you between the phone and the computer.' },

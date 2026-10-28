@@ -44,6 +44,7 @@ const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
 const NEW_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>`;
 const HELP_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.6-.8 1.1v.5"/><path d="M12 17h0"/></svg>`;
 const GPX_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 17.5c1.5 0 1.5-4 3-4s1.5 2.5 3 2.5"/></svg>`;
+const ROUTE_ICON = svg`<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H16"/></svg>`;
 const SHARE_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
 
 export class ApexApp extends LitElement {
@@ -380,7 +381,8 @@ export class ApexApp extends LitElement {
   }
 
   relocateStop(i, p) {
-    const stop = { ...this.route.stops[i], ...p, name: '', detail: '' };
+    const { approx, ...was } = this.route.stops[i];
+    const stop = { ...was, ...p, name: '', detail: '' };
     this.setStops(this.route.stops.map((s, j) => (j === i ? stop : s)));
     this.nameStop(stop);
   }
@@ -655,6 +657,7 @@ export class ApexApp extends LitElement {
     this.active = 0;
     clearTimeout(this.searchTimer);
     this.searchAbort?.abort();
+    if (this.searchLink(q.trim())) return;
     const text = fold(q.trim());
     if (text.length < 2) {
       this.results = [];
@@ -674,8 +677,40 @@ export class ApexApp extends LitElement {
     }, 300);
   }
 
+  // searchLink turns a pasted route link into the one result that opens it: a Google Maps route,
+  // read by the server, or an Apex route link.
+  searchLink(text) {
+    let u;
+    try {
+      u = new URL(text);
+    } catch {
+      return false;
+    }
+    const apex = u.host === location.host && fromRouteLink(u);
+    if (apex) {
+      this.results = [{ kind: 'apex', route: apex }];
+      return true;
+    }
+    if (!/^(maps\.app\.goo\.gl|goo\.gl|(www\.|maps\.)?google\.[a-z.]+)$/.test(u.host)) return false;
+    this.results = [{ kind: 'google', loading: true }];
+    const abort = (this.searchAbort = new AbortController());
+    this.api.importRoute(text, abort.signal).then(
+      preview => this.query.trim() === text && (this.results = [{ kind: 'google', preview }]),
+      err => err.name !== 'AbortError' && this.query.trim() === text && (this.results = [{ kind: 'google', error: err.message }]),
+    );
+    return true;
+  }
+
   choose(result) {
     if (!result) return;
+    if (result.kind) {
+      if (result.kind === 'apex') this.openLinked(result.route);
+      else if (result.preview) this.openImported(result.preview);
+      else return;
+      this.query = '';
+      this.results = [];
+      return;
+    }
     this.addPlace(result, this.insertAt);
     this.insertAt = null;
     this.query = '';
@@ -713,12 +748,31 @@ export class ApexApp extends LitElement {
             ${this.results.map((r, i) => html`
               <li role="option" aria-selected=${i === this.active} @pointerenter=${() => (this.active = i)}
                 @click=${() => this.choose(r)}>
-                ${r.list ? this.listBadge(r.list) : html`<span class="result-pin">${PIN_ICON}</span>`}
-                <span class="label"><span class="name">${r.name}</span>${r.detail ? html`<span class="detail">${r.detail}</span>` : nothing}</span>
+                ${r.kind ? this.renderLinkResult(r) : html`
+                  ${r.list ? this.listBadge(r.list) : html`<span class="result-pin">${PIN_ICON}</span>`}
+                  <span class="label"><span class="name">${r.name}</span>${r.detail ? html`<span class="detail">${r.detail}</span>` : nothing}</span>`}
               </li>`)}
           </ul>` : nothing}
       </div>
     `;
+  }
+
+  renderLinkResult(r) {
+    const icon = html`<span class="result-pin">${ROUTE_ICON}</span>`;
+    if (r.kind === 'apex') {
+      return html`${icon}<span class="label"><span class="name">${t('Open this route')}</span>
+        <span class="detail">${plural(r.route.stops.length, '{n} stop', '{n} stops')}</span></span>`;
+    }
+    if (r.loading) return html`<span class="result-pin"><span class="spinner"></span></span><span class="label"><span class="name">${t('Reading the Google Maps link…')}</span></span>`;
+    if (r.error) return html`${icon}<span class="label"><span class="name">${t('This link is not a route')}</span><span class="detail">${t('In Google Maps, share it from Directions')}</span></span>`;
+    const { stops, fromHere, avoid } = r.preview;
+    const names = [...(fromHere ? [t('My location')] : []), ...stops.map(s => s.name || coords(s))];
+    const avoided = [['highways', 'No motorways'], ['tolls', 'No tolls'], ['ferries', 'No ferries']].filter(([k]) => avoid[k]).map(([, l]) => t(l));
+    return html`${icon}<span class="label">
+      <span class="name">${t('Import the Google Maps route')}</span>
+      <span class="detail chain">${names.join(' → ')}</span>
+      <span class="detail">${[plural(stops.length, '{n} stop', '{n} stops'), ...avoided].join(', ')}</span>
+    </span>`;
   }
 
   async loadSaved() {
@@ -872,6 +926,23 @@ export class ApexApp extends LitElement {
       await this.copy(url, 'apex');
     }
     this.askDonate();
+  }
+
+  openImported({ stops, fromHere, avoid }) {
+    if (!this.confirmDiscard()) return;
+    this.route = {
+      ...blankRoute(),
+      mode: this.route.mode,
+      fromHere,
+      avoid,
+      stops: stops.map(s => ({ lat: s.lat, lng: s.lng, name: s.name ?? '', detail: '', ...(s.approx ? { approx: true } : {}) })),
+    };
+    this.selected = -1;
+    this.dirty = true;
+    this.changed({ fit: true });
+    this.nameUnnamed();
+    if (fromHere) this.useMyLocation();
+    this.flash(plural(stops.length, 'Imported {n} stop from Google Maps', 'Imported {n} stops from Google Maps'));
   }
 
   // openLinked opens a route read from a route link as an unsaved copy.
@@ -1080,6 +1151,7 @@ export class ApexApp extends LitElement {
           <span class="label" title=${coords(s)}>
             <span class="name ${s.name ? '' : 'pending'}">${s.name || coords(s)}</span>
             ${s.detail ? html`<span class="detail">${s.detail}</span>` : nothing}
+            ${s.approx ? html`<span class="approx">${t('Found by name: check it is this one')}</span>` : nothing}
           </span>
           ${!this.advanced && arriving ? html`<span class="km">${km(arriving.meters)}</span>` : nothing}
           <button class="icon remove" title=${t('Remove')} @click=${e => (e.stopPropagation(), this.removeStop(i))}>✕</button>

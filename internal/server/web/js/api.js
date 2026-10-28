@@ -30,6 +30,15 @@ export class Api {
     return this.request(`api/search?q=${encodeURIComponent(q)}${at}`, { signal });
   }
 
+  importRoute(url, signal) {
+    return this.request('api/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal,
+    });
+  }
+
   me() {
     return this.request('api/me');
   }
