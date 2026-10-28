@@ -171,8 +171,8 @@ const es = {
   'How it works': 'Cómo funciona',
   'Draw your route': 'Dibuja tu ruta',
   'Find a place': 'Busca un sitio',
-  'Search a town, a pass or one of your places. The + on a leg puts it between two stops.':
-    'Busca un pueblo, un puerto o uno de tus sitios. El + de un tramo lo mete entre dos paradas.',
+  'Search a town, a pass or one of your places; the + on a leg puts it between two stops. Paste a route shared from Google Maps and it comes over whole.':
+    'Busca un pueblo, un puerto o uno de tus sitios; el + de un tramo lo mete entre dos paradas. Pega una ruta compartida desde Google Maps y se importa entera.',
   'Ride each leg your way': 'Cada tramo a tu manera',
   'In Advanced, choose each leg: fast, curvy or twisty. Tap the dot next to each kind to pick its colour.':
     'En Avanzado eliges cada tramo: rápida, curvas o muchas curvas. Toca el punto de cada tipo para cambiar su color.',
