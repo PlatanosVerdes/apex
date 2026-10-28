@@ -189,6 +189,7 @@ const es = {
   Back: 'Atrás',
   Skip: 'Saltar',
   Close: 'Cerrar',
+  Privacy: 'Privacidad',
   'Start riding': 'Empezar',
   'Your stops': 'Tus paradas',
   'Each stop you add shows here with its number. Drag it on the map to move it, drag ⠿ to change the order, and ✕ takes it away.':

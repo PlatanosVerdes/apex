@@ -147,6 +147,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /r/{points...}", func(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r, "index.html", files["index.html"])
 	})
+	mux.HandleFunc("GET /privacy", func(w http.ResponseWriter, r *http.Request) {
+		serveAsset(w, r, "privacy.html", files["privacy.html"])
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok "+s.Version+"\n")
 	})

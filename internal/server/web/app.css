@@ -472,6 +472,10 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .account-menu .who span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-menu button { font: inherit; text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; }
 .account-menu button:hover { background: var(--soft); }
+.account-menu a { padding: 7px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+.account-menu a:hover { background: var(--soft); }
+.tour-privacy { display: block; margin: -6px 0 12px; font-size: 12px; color: var(--muted); text-decoration: none; }
+.tour-privacy:hover { color: var(--ink); text-decoration: underline; }
 .account-menu .menu-note { border-top: 0; margin-top: 0; }
 
 .panel header input { text-overflow: ellipsis; }

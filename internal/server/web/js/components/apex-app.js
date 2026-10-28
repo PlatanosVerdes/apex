@@ -1399,6 +1399,7 @@ export class ApexApp extends LitElement {
               ${user.name ? html`<b>${user.name}</b>` : nothing}
               <span>${user.email}</span>
             </div>
+            <a role="menuitem" href="/privacy" target="_blank" rel="noopener">${t('Privacy')}</a>
             <button role="menuitem" @click=${() => ((this.popover = null), this.signOut())}>${t('Sign out')}</button>
           </div>` : nothing}
       </span>`;
