@@ -48,7 +48,9 @@ type Server struct {
 	// DevLogin lets this machine sign in as made-up riders, to try accounts without Google.
 	DevLogin bool
 	// Owner is the email that, on signing in, takes over what LegacyDir held from before accounts.
-	Owner      string
+	Owner string
+	// Donate invites riders to chip in after they take a route out; nil shows no invitation.
+	Donate     *Donate
 	LegacyDir  string
 	ListSource ListSource
 	Planner    Planner
@@ -64,6 +66,18 @@ type Server struct {
 	Metrics *metrics.Registry
 	Version string
 	Log     *slog.Logger
+}
+
+type Donate struct {
+	URL string `json:"url"`
+	// Chance is how likely taking a route out asks, from 0 to 1.
+	Chance float64 `json:"chance"`
+	// EverySeconds is the least time between two invitations to the same browser.
+	EverySeconds int64 `json:"everySeconds"`
+	// AtStops also asks when a route reaches this many stops; zero never does.
+	AtStops int `json:"atStops"`
+	// AfterUses is how many routes a browser takes out or draws long before it is first asked.
+	AfterUses int `json:"afterUses"`
 }
 
 func (s *Server) Handler() http.Handler {
@@ -104,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/routes/{id}", s.signedIn(s.getRoute))
 	mux.HandleFunc("PUT /api/routes/{id}", s.signedIn(s.saveRoute))
 	mux.HandleFunc("DELETE /api/routes/{id}", s.signedIn(s.deleteRoute))
+	mux.HandleFunc("POST /api/donate", s.limited(s.donateEvent))
 	mux.HandleFunc("GET /api/lists", s.signedIn(s.listLists))
 	mux.HandleFunc("POST /api/lists", s.signedIn(s.addList))
 	mux.HandleFunc("POST /api/lists/read", s.limited(s.readList))

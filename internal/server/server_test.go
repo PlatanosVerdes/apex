@@ -377,6 +377,10 @@ func TestMetricsCountWithoutNaming(t *testing.T) {
 		do(t, a, http.MethodPost, srv.URL+"/api/plan", `{"points":[[39.57,2.65],[39.7,2.7]],"legs":[{"style":"curvy"}]}`)
 	}
 	do(t, http.DefaultClient, http.MethodGet, srv.URL+"/api/routes", "")
+	do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/donate", `{"event":"clicked"}`)
+	if resp := do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/donate", `{"event":"anything"}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown donate event: %d", resp.StatusCode)
+	}
 	var b strings.Builder
 	reg.Write(&b)
 	out := b.String()
@@ -388,6 +392,7 @@ func TestMetricsCountWithoutNaming(t *testing.T) {
 		"apex_accounts 1",
 		"apex_saved_routes 1",
 		`apex_riders{window="24h",kind="account"} 1`,
+		`apex_donate_events_total{event="clicked"} 1`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)

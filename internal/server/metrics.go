@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,4 +92,22 @@ func (t *Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.Metrics.Observe("apex_upstream_seconds", "Time taken by calls to other servers.", time.Since(start), "service", service)
 	t.Metrics.Inc("apex_upstream_requests_total", "Calls to other servers by how they ended.", "service", service, "outcome", outcome)
 	return resp, err
+}
+
+// donateEvent counts {"event": "shown" | "clicked" | "dismissed"} from the page's invitation to donate.
+func (s *Server) donateEvent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Event string `json:"event"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	switch body.Event {
+	case "shown", "clicked", "dismissed":
+		s.Metrics.Inc("apex_donate_events_total", "What riders did with the invitation to donate.", "event", body.Event)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "unknown event", http.StatusBadRequest)
+	}
 }

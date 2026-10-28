@@ -87,5 +87,9 @@ go run ./cmd/apex
 | `APEX_CURVE_SEARCHES`, `APEX_CURVE_REFILL` | `20`, `30s` | each rider's curve-search budget |
 | `APEX_PUBLIC_REQUESTS`, `APEX_PUBLIC_REFILL` | `120`, `500ms` | each address's budget on the open endpoints |
 | `APEX_LISTS_EVERY` | `3h` | how often linked lists are read again |
+| `APEX_DONATE_URL` | | an `https://` link the page invites regular riders to chip in at; empty never asks |
+| `APEX_DONATE_AFTER_USES` | `5` | routes a browser takes out (Google Maps, share) or draws long before it is first asked |
+| `APEX_DONATE_CHANCE`, `APEX_DONATE_EVERY` | `0.5`, `168h` | odds of asking once due, and the wait between asks, doubled after each "Not now" |
+| `APEX_DONATE_AT_STOPS` | `10` | reaching this many stops also counts as a use; `0` turns it off |
 | `APEX_METRICS_ADDR` | | where `/metrics` is served for Prometheus, e.g. `:9100`; never the public address |
 | `APEX_VALHALLA_URL`, `APEX_NOMINATIM_URL`, `APEX_PHOTON_URL` | public servers | |
