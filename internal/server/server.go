@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -70,14 +71,58 @@ type Server struct {
 
 type Donate struct {
 	URL string `json:"url"`
-	// Chance is how likely taking a route out asks, from 0 to 1.
-	Chance float64 `json:"chance"`
-	// EverySeconds is the least time between two invitations to the same browser.
-	EverySeconds int64 `json:"everySeconds"`
-	// AtStops also asks when a route reaches this many stops; zero never does.
+	// The rest is active time, in seconds: the page counts it while someone is using it.
+	// FirstSeconds is used before the first invitation.
+	FirstSeconds int64 `json:"firstSeconds"`
+	// LaterSeconds is the wait after a "Not now", doubled for each one up to MostSeconds.
+	LaterSeconds int64 `json:"laterSeconds"`
+	MostSeconds  int64 `json:"mostSeconds"`
+	// ThanksSeconds is the wait after a rider followed the link.
+	ThanksSeconds int64 `json:"thanksSeconds"`
+	// GapSeconds is wall-clock time: never two invitations closer than this.
+	GapSeconds int64 `json:"gapSeconds"`
+	// AtStops counts reaching this many stops as a moment to ask, like taking a route out; zero never does.
 	AtStops int `json:"atStops"`
-	// AfterUses is how many routes a browser takes out or draws long before it is first asked.
-	AfterUses int `json:"afterUses"`
+}
+
+// ParseDonate reads APEX_DONATE: "url=https://… first=1h later=2h most=32h thanks=10h gap=24h stops=10",
+// split by spaces or commas; everything but url has a default. Empty means no invitation.
+func ParseDonate(config string) (*Donate, error) {
+	if strings.TrimSpace(config) == "" {
+		return nil, nil
+	}
+	d := &Donate{FirstSeconds: 3600, LaterSeconds: 2 * 3600, MostSeconds: 32 * 3600, ThanksSeconds: 10 * 3600, GapSeconds: 24 * 3600, AtStops: 10}
+	waits := map[string]*int64{"first": &d.FirstSeconds, "later": &d.LaterSeconds, "most": &d.MostSeconds, "thanks": &d.ThanksSeconds, "gap": &d.GapSeconds}
+	for _, field := range strings.FieldsFunc(config, func(r rune) bool { return r == ' ' || r == ',' }) {
+		key, value, ok := strings.Cut(field, "=")
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("APEX_DONATE: %q is not key=value", field)
+		case key == "url":
+			if !strings.HasPrefix(value, "https://") {
+				return nil, errors.New("APEX_DONATE: url must be an https link")
+			}
+			d.URL = value
+		case key == "stops":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("APEX_DONATE: stops=%q is not a count", value)
+			}
+			d.AtStops = n
+		case waits[key] != nil:
+			wait, err := time.ParseDuration(value)
+			if err != nil || wait < 0 {
+				return nil, fmt.Errorf("APEX_DONATE: %s=%q is not a duration like 2h", key, value)
+			}
+			*waits[key] = int64(wait / time.Second)
+		default:
+			return nil, fmt.Errorf("APEX_DONATE: unknown key %q", key)
+		}
+	}
+	if d.URL == "" {
+		return nil, errors.New("APEX_DONATE needs url=https://…")
+	}
+	return d, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -119,6 +164,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/routes/{id}", s.signedIn(s.saveRoute))
 	mux.HandleFunc("DELETE /api/routes/{id}", s.signedIn(s.deleteRoute))
 	mux.HandleFunc("POST /api/donate", s.limited(s.donateEvent))
+	mux.HandleFunc("GET /api/donate/state", s.signedIn(s.donateState))
+	mux.HandleFunc("PUT /api/donate/state", s.signedIn(s.saveDonateState))
 	mux.HandleFunc("GET /api/lists", s.signedIn(s.listLists))
 	mux.HandleFunc("POST /api/lists", s.signedIn(s.addList))
 	mux.HandleFunc("POST /api/lists/read", s.limited(s.readList))

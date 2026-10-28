@@ -24,6 +24,7 @@ type UserData struct {
 	Routes *Store
 	Lists  *Lists
 	dir    string
+	mu     sync.Mutex
 }
 
 type Users struct {
@@ -100,4 +101,50 @@ func (u *Users) Each(fn func(*UserData)) error {
 		fn(d)
 	}
 	return nil
+}
+
+// DonateState is how much a rider has used Apex and when they were last asked to chip in; the page
+// decides from it, the server only keeps it so it survives a new browser.
+type DonateState struct {
+	// ActiveSeconds is time spent using the page with someone at it.
+	ActiveSeconds int64 `json:"activeSeconds"`
+	// DueSeconds is the active time from which the rider may be asked again.
+	DueSeconds int64 `json:"dueSeconds"`
+	// ShownAt is when they were last asked, in Unix milliseconds.
+	ShownAt  int64 `json:"shownAt"`
+	Declined int   `json:"declined"`
+}
+
+func (d *UserData) DonateState() (DonateState, error) {
+	var s DonateState
+	data, err := os.ReadFile(filepath.Join(d.dir, "donate.json"))
+	if os.IsNotExist(err) {
+		return s, nil
+	}
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(data, &s)
+}
+
+// MergeDonateState keeps the furthest of what is stored and s, field by field, so a browser that
+// fell behind never winds another one back.
+func (d *UserData) MergeDonateState(s DonateState) (DonateState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	old, err := d.DonateState()
+	if err != nil {
+		return old, err
+	}
+	merged := DonateState{
+		ActiveSeconds: max(old.ActiveSeconds, s.ActiveSeconds),
+		DueSeconds:    max(old.DueSeconds, s.DueSeconds),
+		ShownAt:       max(old.ShownAt, s.ShownAt),
+		Declined:      max(old.Declined, s.Declined),
+	}
+	data, err := json.Marshal(merged)
+	if err != nil {
+		return old, err
+	}
+	return merged, os.WriteFile(filepath.Join(d.dir, "donate.json"), data, 0o600)
 }

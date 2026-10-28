@@ -10,8 +10,10 @@ import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../guide.
 const DRAFT_KEY = 'apex.draft';
 const HIDDEN_KEY = 'apex.hiddenLists';
 const LOCAL_LISTS_KEY = 'apex.lists';
-const DONATE_KEY = 'apex.donate';
-const DONATE_THANKS_MS = 180 * 24 * 3600e3;
+const DONATE_KEY = 'apex.donateState';
+const ACTIVE_TICK_S = 15;
+// Time counts as use while the page is in view and someone touched it within this.
+const IDLE_MS = 120e3;
 const LIST_STALE_MS = 3 * 3600e3;
 const COLOURS = ['teal', 'blue', 'green', 'amber', 'red', 'slate', 'cyan', 'brown'];
 // The most "paradas" seen opening in the Google Maps app from one link.
@@ -168,6 +170,12 @@ export class ApexApp extends LitElement {
   }
 
   firstUpdated() {
+    this.lastInput = 0;
+    this.donateSynced = 0;
+    for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel']) {
+      window.addEventListener(type, () => (this.lastInput = Date.now()), { passive: true });
+    }
+    setInterval(() => this.countActiveTime(), ACTIVE_TICK_S * 1000);
     this.addEventListener('dragover', e => e.dataTransfer?.types.includes('Files') && e.preventDefault());
     this.addEventListener('drop', e => this.dropGPX(e));
     this.map = new RouteMap(this.querySelector('.map'), {
@@ -730,6 +738,7 @@ export class ApexApp extends LitElement {
     }
     if (!this.account.user) return this.loadLocalLists();
     this.loadSaved();
+    this.loadDonateState();
     await this.adoptLocalLists();
     this.loadLists();
   }
@@ -877,20 +886,16 @@ export class ApexApp extends LitElement {
     this.flash(t('Route opened from a link. Save it to keep your own copy.'));
   }
 
-  // askDonate counts each route taken out or drawn long, and only once a rider has used Apex a while
-  // now and then invites them to chip in. Each "Not now" doubles the wait; a click on the link
-  // leaves them alone for half a year.
+  // askDonate, at a moment the rider took a route out or drew a long one, invites them to chip in once
+  // they have used Apex long enough (APEX_DONATE). The wait is in active time, so who rides a lot is
+  // asked sooner; each "Not now" doubles it.
   askDonate() {
     const donate = this.account.donate;
     if (!donate) return;
-    const seen = { uses: 0, shown: 0, declined: 0, clicked: 0, ...readJSON(DONATE_KEY) };
-    seen.uses++;
+    const seen = donateSeen();
     const now = Date.now();
-    const wait = donate.everySeconds * 1000 * 2 ** Math.min(seen.declined, 5);
-    const ask = seen.uses >= donate.afterUses && now - seen.clicked >= DONATE_THANKS_MS && now - seen.shown >= wait && Math.random() < donate.chance;
-    if (ask) seen.shown = now;
-    writeJSON(DONATE_KEY, seen);
-    if (!ask) return;
+    if (seen.activeSeconds < (seen.dueSeconds || donate.firstSeconds) || now - seen.shownAt < donate.gapSeconds * 1000) return;
+    this.keepDonate({ ...seen, shownAt: now }, true);
     const show = () => {
       this.popover = null;
       this.donateAsk = true;
@@ -907,13 +912,41 @@ export class ApexApp extends LitElement {
     }, 1200);
   }
 
+  countActiveTime() {
+    if (!this.account.donate || document.hidden || Date.now() - this.lastInput > IDLE_MS) return;
+    const seen = donateSeen();
+    this.keepDonate({ ...seen, activeSeconds: seen.activeSeconds + ACTIVE_TICK_S }, Date.now() - this.donateSynced > 60e3);
+  }
+
+  // keepDonate stores the donation state in this browser and, for a signed-in rider, on the server
+  // too, so a new browser or a cleared one does not start from zero.
+  keepDonate(seen, sync) {
+    writeJSON(DONATE_KEY, seen);
+    if (!sync || !this.account.user) return;
+    this.donateSynced = Date.now();
+    this.api.saveDonateState(seen).then(merged => writeJSON(DONATE_KEY, furthest(donateSeen(), merged)), () => {});
+  }
+
+  async loadDonateState() {
+    if (!this.account.donate) return;
+    try {
+      this.keepDonate(furthest(donateSeen(), await this.api.donateState()), true);
+    } catch {}
+  }
+
   renderDonateAsk() {
     const close = event => {
       this.donateAsk = false;
       this.api.donateEvent(event);
-      const seen = readJSON(DONATE_KEY) ?? {};
-      if (event === 'clicked') writeJSON(DONATE_KEY, { ...seen, clicked: Date.now(), declined: 0 });
-      else writeJSON(DONATE_KEY, { ...seen, declined: (seen.declined ?? 0) + 1 });
+      const donate = this.account.donate;
+      const seen = donateSeen();
+      if (event === 'clicked') {
+        this.keepDonate({ ...seen, declined: 0, dueSeconds: seen.activeSeconds + donate.thanksSeconds }, true);
+      } else {
+        const declined = seen.declined + 1;
+        const wait = Math.min(donate.laterSeconds * 2 ** (declined - 1), donate.mostSeconds);
+        this.keepDonate({ ...seen, declined, dueSeconds: seen.activeSeconds + wait }, true);
+      }
     };
     return html`
       <div class="tour" role="dialog" aria-modal="true" aria-labelledby="donate-title" @keydown=${e => e.key === 'Escape' && close('dismissed')}>
@@ -1449,6 +1482,15 @@ function loadDraft() {
 }
 
 customElements.define('apex-app', ApexApp);
+
+function donateSeen() {
+  return { activeSeconds: 0, dueSeconds: 0, shownAt: 0, declined: 0, ...readJSON(DONATE_KEY) };
+}
+
+// furthest keeps the larger of each count, as the server does, so neither copy winds the other back.
+function furthest(a, b) {
+  return Object.fromEntries(Object.keys(a).map(k => [k, Math.max(a[k] ?? 0, b?.[k] ?? 0)]));
+}
 
 function readJSON(key) {
   try {

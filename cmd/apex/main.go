@@ -44,7 +44,6 @@ func run() error {
 		photonURL    = env("APEX_PHOTON_URL", photon.DefaultBaseURL)
 		publicURL    = env("APEX_PUBLIC_URL", "")
 		clientID     = env("APEX_GOOGLE_CLIENT_ID", "")
-		donateURL    = env("APEX_DONATE_URL", "")
 		logAsJSON    = env("APEX_LOG_JSON", "") == "1"
 		// Never published to the tunnel: only Prometheus reads it.
 		metricsAddr = env("APEX_METRICS_ADDR", "")
@@ -68,24 +67,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	var donate *server.Donate
-	if donateURL != "" {
-		if !strings.HasPrefix(donateURL, "https://") {
-			return errors.New("APEX_DONATE_URL must be an https link")
-		}
-		chance, err := strconv.ParseFloat(env("APEX_DONATE_CHANCE", "0.5"), 64)
-		if err != nil || chance < 0 || chance > 1 {
-			return errors.New("APEX_DONATE_CHANCE must be a number from 0 to 1")
-		}
-		every := duration("APEX_DONATE_EVERY", 7*24*time.Hour)
-		donate = &server.Donate{
-			URL:          donateURL,
-			Chance:       chance,
-			EverySeconds: int64(every / time.Second),
-			AtStops:      number("APEX_DONATE_AT_STOPS", 10),
-			AfterUses:    number("APEX_DONATE_AFTER_USES", 5),
-		}
+	donate, err := server.ParseDonate(os.Getenv("APEX_DONATE"))
+	if err != nil {
+		return err
 	}
+
 	var google *auth.Google
 	if clientID != "" {
 		if publicURL == "" {

@@ -447,3 +447,43 @@ func TestAssetsCompressedAndCached(t *testing.T) {
 		t.Errorf("gzipped plan does not decode: %v", err)
 	}
 }
+
+func TestParseDonate(t *testing.T) {
+	d, err := ParseDonate("url=https://ko-fi.com/x, first=30m later=1h stops=0")
+	if err != nil || d.URL != "https://ko-fi.com/x" || d.FirstSeconds != 1800 || d.LaterSeconds != 3600 || d.AtStops != 0 || d.GapSeconds != 24*3600 {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if d, err := ParseDonate(""); d != nil || err != nil {
+		t.Errorf("empty must mean no invitation: %+v %v", d, err)
+	}
+	for _, bad := range []string{"first=1h", "url=http://x", "url=https://x first=soon", "url=https://x colour=red", "url=https://x stops"} {
+		if _, err := ParseDonate(bad); err == nil {
+			t.Errorf("%q must fail", bad)
+		}
+	}
+}
+
+func TestDonateStateFollowsTheRider(t *testing.T) {
+	srv, _ := newServer(t)
+	if resp := do(t, http.DefaultClient, http.MethodPut, srv.URL+"/api/donate/state", `{"activeSeconds":60}`); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("signed out: %d", resp.StatusCode)
+	}
+	a := rider(t, srv, "a")
+	do(t, a, http.MethodPut, srv.URL+"/api/donate/state", `{"activeSeconds":600,"dueSeconds":3600,"shownAt":5,"declined":1}`)
+	// A browser that fell behind must not wind the count back.
+	resp := do(t, a, http.MethodPut, srv.URL+"/api/donate/state", `{"activeSeconds":120}`)
+	var got store.DonateState
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	if got != (store.DonateState{ActiveSeconds: 600, DueSeconds: 3600, ShownAt: 5, Declined: 1}) {
+		t.Fatalf("%+v", got)
+	}
+	if resp := do(t, a, http.MethodPut, srv.URL+"/api/donate/state", `{"activeSeconds":-1}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("negative time: %d", resp.StatusCode)
+	}
+	b := rider(t, srv, "b")
+	resp = do(t, b, http.MethodGet, srv.URL+"/api/donate/state", "")
+	_ = json.NewDecoder(resp.Body).Decode(&got)
+	if got != (store.DonateState{}) {
+		t.Errorf("rider b sees rider a's state: %+v", got)
+	}
+}
