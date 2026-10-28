@@ -456,14 +456,15 @@ func TestAssetsCompressedAndCached(t *testing.T) {
 }
 
 func TestParseDonate(t *testing.T) {
-	d, err := ParseDonate("url=https://ko-fi.com/x, first=30m later=1h stops=0")
-	if err != nil || d.URL != "https://ko-fi.com/x" || d.FirstSeconds != 1800 || d.LaterSeconds != 3600 || d.AtStops != 0 || d.GapSeconds != 24*3600 {
+	d, err := ParseDonate("url=https://ko-fi.com/x, first=30m later=1h stops=0 rounds=3")
+	if err != nil || d.URL != "https://ko-fi.com/x" || d.FirstSeconds != 1800 || d.LaterSeconds != 3600 || d.AtStops != 0 ||
+		d.GapSeconds != 24*3600 || d.Rounds != 3 || d.RestSeconds != 60*24*3600 {
 		t.Fatalf("%+v %v", d, err)
 	}
 	if d, err := ParseDonate(""); d != nil || err != nil {
 		t.Errorf("empty must mean no invitation: %+v %v", d, err)
 	}
-	for _, bad := range []string{"first=1h", "url=http://x", "url=https://x first=soon", "url=https://x colour=red", "url=https://x stops"} {
+	for _, bad := range []string{"first=1h", "url=http://x", "url=https://x first=soon", "url=https://x colour=red", "url=https://x stops", "url=https://x rounds=0"} {
 		if _, err := ParseDonate(bad); err == nil {
 			t.Errorf("%q must fail", bad)
 		}

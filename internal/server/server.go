@@ -82,18 +82,22 @@ type Donate struct {
 	ThanksSeconds int64 `json:"thanksSeconds"`
 	// GapSeconds is wall-clock time: never two invitations closer than this.
 	GapSeconds int64 `json:"gapSeconds"`
+	// After Rounds "Not now" in a row the rider is left alone RestSeconds (wall clock), then the
+	// waits start again from FirstSeconds.
+	Rounds      int   `json:"rounds"`
+	RestSeconds int64 `json:"restSeconds"`
 	// AtStops counts reaching this many stops as a moment to ask, like taking a route out; zero never does.
 	AtStops int `json:"atStops"`
 }
 
-// ParseDonate reads APEX_DONATE: "url=https://… first=1h later=2h most=32h thanks=10h gap=24h stops=10",
+// ParseDonate reads APEX_DONATE: "url=https://… first=1h later=2h most=32h thanks=10h gap=24h rounds=5 rest=1440h stops=10",
 // split by spaces or commas; everything but url has a default. Empty means no invitation.
 func ParseDonate(config string) (*Donate, error) {
 	if strings.TrimSpace(config) == "" {
 		return nil, nil
 	}
-	d := &Donate{FirstSeconds: 3600, LaterSeconds: 2 * 3600, MostSeconds: 32 * 3600, ThanksSeconds: 10 * 3600, GapSeconds: 24 * 3600, AtStops: 10}
-	waits := map[string]*int64{"first": &d.FirstSeconds, "later": &d.LaterSeconds, "most": &d.MostSeconds, "thanks": &d.ThanksSeconds, "gap": &d.GapSeconds}
+	d := &Donate{FirstSeconds: 3600, LaterSeconds: 2 * 3600, MostSeconds: 32 * 3600, ThanksSeconds: 10 * 3600, GapSeconds: 24 * 3600, Rounds: 5, RestSeconds: 60 * 24 * 3600, AtStops: 10}
+	waits := map[string]*int64{"first": &d.FirstSeconds, "later": &d.LaterSeconds, "most": &d.MostSeconds, "thanks": &d.ThanksSeconds, "gap": &d.GapSeconds, "rest": &d.RestSeconds}
 	for _, field := range strings.FieldsFunc(config, func(r rune) bool { return r == ' ' || r == ',' }) {
 		key, value, ok := strings.Cut(field, "=")
 		switch {
@@ -104,12 +108,16 @@ func ParseDonate(config string) (*Donate, error) {
 				return nil, errors.New("APEX_DONATE: url must be an https link")
 			}
 			d.URL = value
-		case key == "stops":
+		case key == "stops" || key == "rounds":
 			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 {
-				return nil, fmt.Errorf("APEX_DONATE: stops=%q is not a count", value)
+			if err != nil || n < 0 || (key == "rounds" && n == 0) {
+				return nil, fmt.Errorf("APEX_DONATE: %s=%q is not a count", key, value)
 			}
-			d.AtStops = n
+			if key == "stops" {
+				d.AtStops = n
+			} else {
+				d.Rounds = n
+			}
 		case waits[key] != nil:
 			wait, err := time.ParseDuration(value)
 			if err != nil || wait < 0 {
