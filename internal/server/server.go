@@ -90,13 +90,13 @@ type Donate struct {
 	AtStops int `json:"atStops"`
 }
 
-// ParseDonate reads APEX_DONATE: "url=https://… first=1h later=2h most=32h thanks=10h gap=24h rounds=5 rest=96h stops=10",
+// ParseDonate reads APEX_DONATE: "url=https://… first=1h later=2h most=32h thanks=10h gap=24h rounds=5 rest=1440h stops=10",
 // split by spaces or commas; everything but url has a default. Empty means no invitation.
 func ParseDonate(config string) (*Donate, error) {
 	if strings.TrimSpace(config) == "" {
 		return nil, nil
 	}
-	d := &Donate{FirstSeconds: 3600, LaterSeconds: 2 * 3600, MostSeconds: 32 * 3600, ThanksSeconds: 10 * 3600, GapSeconds: 24 * 3600, Rounds: 5, RestSeconds: 96 * 3600, AtStops: 10}
+	d := &Donate{FirstSeconds: 3600, LaterSeconds: 2 * 3600, MostSeconds: 32 * 3600, ThanksSeconds: 10 * 3600, GapSeconds: 24 * 3600, Rounds: 5, RestSeconds: 60 * 24 * 3600, AtStops: 10}
 	waits := map[string]*int64{"first": &d.FirstSeconds, "later": &d.LaterSeconds, "most": &d.MostSeconds, "thanks": &d.ThanksSeconds, "gap": &d.GapSeconds, "rest": &d.RestSeconds}
 	for _, field := range strings.FieldsFunc(config, func(r rune) bool { return r == ' ' || r == ',' }) {
 		key, value, ok := strings.Cut(field, "=")

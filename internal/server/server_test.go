@@ -458,7 +458,7 @@ func TestAssetsCompressedAndCached(t *testing.T) {
 func TestParseDonate(t *testing.T) {
 	d, err := ParseDonate("url=https://ko-fi.com/x, first=30m later=1h stops=0 rounds=3")
 	if err != nil || d.URL != "https://ko-fi.com/x" || d.FirstSeconds != 1800 || d.LaterSeconds != 3600 || d.AtStops != 0 ||
-		d.GapSeconds != 24*3600 || d.Rounds != 3 || d.RestSeconds != 96*3600 {
+		d.GapSeconds != 24*3600 || d.Rounds != 3 || d.RestSeconds != 60*24*3600 {
 		t.Fatalf("%+v %v", d, err)
 	}
 	if d, err := ParseDonate(""); d != nil || err != nil {
