@@ -54,6 +54,7 @@ type Server struct {
 	Donate     *Donate
 	LegacyDir  string
 	ListSource ListSource
+	RouteLinks RouteLinks
 	Planner    Planner
 	// Curves is each rider's budget of curve searches; Public each address's budget of requests
 	// to the endpoints anyone can call. Nil means no limit.
@@ -166,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/routes/{id}", s.signedIn(s.getRoute))
 	mux.HandleFunc("PUT /api/routes/{id}", s.signedIn(s.saveRoute))
 	mux.HandleFunc("DELETE /api/routes/{id}", s.signedIn(s.deleteRoute))
+	mux.HandleFunc("POST /api/import", s.limited(s.importRoute))
 	mux.HandleFunc("POST /api/donate", s.limited(s.donateEvent))
 	mux.HandleFunc("GET /api/donate/state", s.signedIn(s.donateState))
 	mux.HandleFunc("PUT /api/donate/state", s.signedIn(s.saveDonateState))

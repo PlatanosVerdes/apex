@@ -421,6 +421,10 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .results .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .detail { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-pin { display: inline-flex; width: 20px; justify-content: center; color: var(--muted); }
+.results .detail.chain { color: var(--ink); white-space: normal; }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.stop .approx { color: var(--curvy); font-size: 12px; }
 
 
 
