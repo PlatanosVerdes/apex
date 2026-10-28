@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/routes/{id}", s.signedIn(s.deleteRoute))
 	mux.HandleFunc("GET /api/lists", s.signedIn(s.listLists))
 	mux.HandleFunc("POST /api/lists", s.signedIn(s.addList))
+	mux.HandleFunc("POST /api/lists/read", s.limited(s.readList))
 	mux.HandleFunc("POST /api/lists/{id}/refresh", s.signedIn(s.refreshList))
 	mux.HandleFunc("PATCH /api/lists/{id}", s.signedIn(s.setListColour))
 	mux.HandleFunc("DELETE /api/lists/{id}", s.signedIn(s.deleteList))

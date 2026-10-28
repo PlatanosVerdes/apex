@@ -50,6 +50,14 @@ export class Api {
     });
   }
 
+  readList(url) {
+    return this.request('api/lists/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+  }
+
   refreshList(id) {
     return this.request(`api/lists/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
   }

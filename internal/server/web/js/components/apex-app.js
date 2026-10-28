@@ -9,6 +9,8 @@ import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../guide.
 
 const DRAFT_KEY = 'apex.draft';
 const HIDDEN_KEY = 'apex.hiddenLists';
+const LOCAL_LISTS_KEY = 'apex.lists';
+const LIST_STALE_MS = 3 * 3600e3;
 const COLOURS = ['teal', 'blue', 'green', 'amber', 'red', 'slate', 'cyan', 'brown'];
 // The most "paradas" seen opening in the Google Maps app from one link.
 const TESTED_GOOGLE_STOPS = 23;
@@ -35,6 +37,8 @@ const DEFAULT_LEG_COLOURS = { fast: 'blue', curvy: 'lime', twisty: 'magenta' };
 const LEG_VARS = { fast: '--route', curvy: '--curvy', twisty: '--twisty' };
 const LEG_COLOURS_KEY = 'apex.legColours';
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+const NEW_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>`;
+const HELP_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.6-.8 1.1v.5"/><path d="M12 17h0"/></svg>`;
 const SHARE_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
 
 export class ApexApp extends LitElement {
@@ -470,8 +474,49 @@ export class ApexApp extends LitElement {
     this.map.setPlaces(this.lists.filter(l => !this.hiddenLists.has(l.id)), place => this.addPlace(place));
   }
 
+  // Signed out, the linked lists live in this browser; signed in, in the rider's account.
+  get localLists() {
+    return !this.account.user;
+  }
+
+  setLocalLists(lists) {
+    writeJSON(LOCAL_LISTS_KEY, lists);
+    this.setLists(lists);
+  }
+
+  // loadLocalLists shows this browser's lists and re-reads the ones older than the server's refresh.
+  async loadLocalLists() {
+    this.setLists(readJSON(LOCAL_LISTS_KEY) ?? []);
+    for (const l of this.lists.filter(l => Date.now() - Date.parse(l.fetched) > LIST_STALE_MS)) {
+      try {
+        const fresh = await this.api.readList(l.url);
+        this.setLocalLists(this.lists.map(x => (x.id === l.id ? { ...fresh, colour: x.colour } : x)));
+      } catch {}
+    }
+  }
+
+  // adoptLocalLists moves the lists linked while signed out into the account that just signed in.
+  async adoptLocalLists() {
+    const local = readJSON(LOCAL_LISTS_KEY) ?? [];
+    for (const l of local) {
+      try {
+        await this.api.addList(l.url);
+        if (l.colour) await this.api.setListColour(l.id, l.colour);
+      } catch {}
+    }
+    if (local.length) writeJSON(LOCAL_LISTS_KEY, []);
+  }
+
+  nextColour() {
+    return COLOURS.find(c => !this.lists.some(l => l.colour === c)) ?? COLOURS[this.lists.length % COLOURS.length];
+  }
+
   async setListColour(id, colour) {
     this.pickingColour = null;
+    if (this.localLists) {
+      this.setLocalLists(this.lists.map(l => (l.id === id ? { ...l, colour } : l)));
+      return;
+    }
     try {
       const updated = await this.api.setListColour(id, colour);
       this.setLists(this.lists.map(l => (l.id === id ? updated : l)));
@@ -497,8 +542,15 @@ export class ApexApp extends LitElement {
     this.listBusy = true;
     this.listError = '';
     try {
-      const list = await this.api.addList(input.value);
-      this.setLists([...this.lists.filter(l => l.id !== list.id), list]);
+      let list;
+      if (this.localLists) {
+        const read = await this.api.readList(input.value);
+        list = { ...read, colour: this.lists.find(l => l.id === read.id)?.colour ?? this.nextColour() };
+        this.setLocalLists([...this.lists.filter(l => l.id !== list.id), list]);
+      } else {
+        list = await this.api.addList(input.value);
+        this.setLists([...this.lists.filter(l => l.id !== list.id), list]);
+      }
       input.value = '';
       this.flash(t('Linked "{name}" with {n} places', { name: list.name, n: list.places.length }));
     } catch (err) {
@@ -512,8 +564,9 @@ export class ApexApp extends LitElement {
     this.listBusy = true;
     this.listError = '';
     try {
-      const fresh = await this.api.refreshList(id);
-      this.setLists(this.lists.map(l => (l.id === id ? fresh : l)));
+      const old = this.lists.find(l => l.id === id);
+      const fresh = this.localLists ? { ...(await this.api.readList(old.url)), colour: old.colour } : await this.api.refreshList(id);
+      (this.localLists ? this.setLocalLists : this.setLists).call(this, this.lists.map(l => (l.id === id ? fresh : l)));
       this.flash(t('"{name}" is up to date', { name: fresh.name }));
     } catch (err) {
       this.listError = t('Could not refresh: {err}', { err: err.message });
@@ -524,8 +577,10 @@ export class ApexApp extends LitElement {
 
   async unlinkList(list) {
     if (!confirm(t('Stop showing "{name}"? The list stays in Google Maps.', { name: list.name }))) return;
+    const rest = this.lists.filter(l => l.id !== list.id);
+    if (this.localLists) return this.setLocalLists(rest);
     await this.api.removeList(list.id);
-    this.setLists(this.lists.filter(l => l.id !== list.id));
+    this.setLists(rest);
   }
 
   toggleList(id, shown) {
@@ -644,8 +699,9 @@ export class ApexApp extends LitElement {
     if (this.signinFailed) {
       this.notice = { text: t('Signing in did not work. Try again.'), bad: true };
     }
-    if (!this.account.user) return;
+    if (!this.account.user) return this.loadLocalLists();
     this.loadSaved();
+    await this.adoptLocalLists();
     this.loadLists();
   }
 
@@ -658,7 +714,7 @@ export class ApexApp extends LitElement {
     await this.api.logout();
     this.account = { ...this.account, user: null };
     this.saved = [];
-    this.setLists([]);
+    this.setLists(readJSON(LOCAL_LISTS_KEY) ?? []);
     this.route = { ...this.route, id: undefined };
     this.flash(t('Signed out'));
   }
@@ -780,12 +836,17 @@ export class ApexApp extends LitElement {
       <div class="popover share-popover">
         <div class="share-row">
           <span class="share-label"><b>${t('Link to this route')}</b><small>${apex.replace(/^https?:\/\//, '')}</small></span>
-          <button class="btn" @click=${() => this.copy(apex, t('{what} copied', { what: t('Link') }))}>${t('Copy')}</button>
-          ${'share' in navigator ? html`<button class="btn" @click=${() => this.shareRouteLink(apex)}>${t('Share')}</button>` : nothing}
+          <button class="btn" ?disabled=${!this.route.stops.length} @click=${() => this.copy(apex, t('{what} copied', { what: t('Link') }))}>${t('Copy')}</button>
+          ${'share' in navigator ? html`<button class="btn" ?disabled=${!this.route.stops.length} @click=${() => this.shareRouteLink(apex)}>${t('Share')}</button>` : nothing}
         </div>
         <div class="share-row">
           <span class="share-label"><b>${t('Google Maps link')}</b><small>${t('To navigate with the phone')}</small></span>
           <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, t('{what} copied', { what: t('Google Maps link') }))}>${t('Copy')}</button>
+        </div>
+        <div class="share-row">
+          <span class="share-label"><b>${t('GPX file')}</b><small>${t('For a GPS or another app')}</small></span>
+          <button class="btn" ?disabled=${this.route.stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export')}</button>
+          <button class="btn" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import…')}</button>
         </div>
       </div>
     `;
@@ -818,17 +879,8 @@ export class ApexApp extends LitElement {
             ? html`<span class="icon saved-mark" title=${t('Saved')} aria-label=${t('Saved')}>${CHECK_ICON}</span>`
             : html`<button class="icon save" title=${t('Save route')} aria-label=${t('Save route')} ?disabled=${stops.length === 0}
                 @click=${() => this.save()}>${SAVE_ICON}</button>`}
-          <span class="more">
-            <button class="icon popover-toggle" title=${t('More')} aria-label=${t('More')} aria-haspopup="menu" aria-expanded=${this.popover === 'more'}
-              @click=${() => this.togglePopover('more')}>⋯</button>
-            ${this.popover === 'more' ? html`
-              <div class="popover more-menu" role="menu">
-                <button role="menuitem" @click=${() => ((this.popover = null), this.startNew())}>${t('New route')}</button>
-                <button role="menuitem" @click=${() => this.tourTo(0)}>${t('How it works')}</button>
-                <button role="menuitem" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import GPX…')}</button>
-                <button role="menuitem" ?disabled=${stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export GPX')}</button>
-              </div>` : nothing}
-          </span>
+          <button class="icon new" title=${t('New route')} aria-label=${t('New route')} @click=${() => this.startNew()}>${NEW_ICON}</button>
+          <button class="icon help" title=${t('How it works')} aria-label=${t('How it works')} @click=${() => this.tourTo(0)}>${HELP_ICON}</button>
           ${this.renderAccount()}
           <input class="gpx-file" type="file" accept=".gpx,application/gpx+xml" hidden
             @change=${e => (this.importGPX(e.target.files[0]), (e.target.value = ''))}>
@@ -879,7 +931,7 @@ export class ApexApp extends LitElement {
             ${t(this.advanced && this.planning ? 'Working out the route…' : 'Open in Google Maps')}
           </a>
           <button class="btn square popover-toggle" title=${t('Share')} aria-label=${t('Share')} aria-expanded=${this.popover === 'share'}
-            ?disabled=${stops.length === 0} @click=${() => this.togglePopover('share')}>${SHARE_ICON}</button>
+            @click=${() => this.togglePopover('share')}>${SHARE_ICON}</button>
           ${this.popover === 'share' ? this.renderShare(link) : nothing}
         </div>
       </aside>
@@ -1239,10 +1291,6 @@ export class ApexApp extends LitElement {
       ${this.popover === 'places' ? html`
         <div class="popover map-popover places-popover">
           <h3>${t('My places')}</h3>
-          ${!this.account.user ? html`
-            <p class="hint">${t('Sign in to link your Google Maps lists and keep them on every device.')}</p>
-            ${this.account.signIn ? html`<button class="btn primary signin-btn" @click=${() => this.signIn()}>${t('Sign in')}</button>` : nothing}
-          ` : html`
           <ul class="layer-lists">
             ${this.lists.map(l => html`
               <li>
@@ -1272,7 +1320,9 @@ export class ApexApp extends LitElement {
           ${this.lists.length === 0
             ? html`<p class="hint">${t('In Google Maps open a list, tap Share and paste the link. It stays linked and refreshes by itself.')}</p>`
             : nothing}
-          `}
+          ${this.localLists && this.lists.length && this.account.signIn
+            ? html`<p class="hint">${t('Kept in this browser.')} <button class="link" @click=${() => this.signIn()}>${t('Sign in')}</button> ${t('to have them on every device.')}</p>`
+            : nothing}
         </div>` : nothing}
     `;
   }

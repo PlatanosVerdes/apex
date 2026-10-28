@@ -27,23 +27,11 @@ func (s *Server) listLists(w http.ResponseWriter, r *http.Request, d *store.User
 
 // addList links the Google Maps list behind {"url": "..."}; adding one already linked refreshes it.
 func (s *Server) addList(w http.ResponseWriter, r *http.Request, d *store.UserData) {
-	var body struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+	link, id, ok := s.resolveList(w, r)
+	if !ok {
 		return
 	}
-	id, err := s.ListSource.Resolve(r.Context(), body.URL)
-	if errors.Is(err, gmaps.ErrNotAList) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err != nil {
-		http.Error(w, "could not open the link: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	l, err := s.fetchList(r.Context(), d, id, body.URL)
+	l, err := s.fetchList(r.Context(), d, id, link)
 	if errors.Is(err, store.ErrLimit) {
 		s.fail(w, err)
 		return
@@ -53,6 +41,41 @@ func (s *Server) addList(w http.ResponseWriter, r *http.Request, d *store.UserDa
 		return
 	}
 	writeJSON(w, l)
+}
+
+// readList answers the list behind {"url": "..."} without keeping it: a signed-out rider's page keeps
+// its lists in the browser and refreshes them through here.
+func (s *Server) readList(w http.ResponseWriter, r *http.Request) {
+	link, id, ok := s.resolveList(w, r)
+	if !ok {
+		return
+	}
+	gl, err := s.ListSource.Fetch(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, store.LinkedList{List: gl, URL: link, Fetched: time.Now().UTC()})
+}
+
+func (s *Server) resolveList(w http.ResponseWriter, r *http.Request) (link, id string, ok bool) {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return "", "", false
+	}
+	id, err := s.ListSource.Resolve(r.Context(), body.URL)
+	if errors.Is(err, gmaps.ErrNotAList) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return "", "", false
+	}
+	if err != nil {
+		http.Error(w, "could not open the link: "+err.Error(), http.StatusBadGateway)
+		return "", "", false
+	}
+	return body.URL, id, true
 }
 
 func (s *Server) refreshList(w http.ResponseWriter, r *http.Request, d *store.UserData) {
