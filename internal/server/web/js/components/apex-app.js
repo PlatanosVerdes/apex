@@ -10,6 +10,10 @@ import { STEPS, markTourSeen, placeBoxes, renderTour, tourSeen } from '../guide.
 const DRAFT_KEY = 'apex.draft';
 const HIDDEN_KEY = 'apex.hiddenLists';
 const LOCAL_LISTS_KEY = 'apex.lists';
+const DONATE_KEY = 'apex.donateState';
+const ACTIVE_TICK_S = 15;
+// Time counts as use while the page is in view and someone touched it within this.
+const IDLE_MS = 120e3;
 const LIST_STALE_MS = 3 * 3600e3;
 const COLOURS = ['teal', 'blue', 'green', 'amber', 'red', 'slate', 'cyan', 'brown'];
 // The most "paradas" seen opening in the Google Maps app from one link.
@@ -39,6 +43,7 @@ const LEG_COLOURS_KEY = 'apex.legColours';
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
 const NEW_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>`;
 const HELP_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.3 2.4c-.5.2-.8.6-.8 1.1v.5"/><path d="M12 17h0"/></svg>`;
+const GPX_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 17.5c1.5 0 1.5-4 3-4s1.5 2.5 3 2.5"/></svg>`;
 const SHARE_ICON = svg`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>`;
 
 export class ApexApp extends LitElement {
@@ -54,6 +59,8 @@ export class ApexApp extends LitElement {
     tall: { state: true },
     here: { state: true },
     lists: { state: true },
+    copied: { state: true },
+    donateAsk: { state: true },
     hiddenLists: { state: true },
     listBusy: { state: true },
     listError: { state: true },
@@ -154,14 +161,30 @@ export class ApexApp extends LitElement {
     super.disconnectedCallback();
   }
 
+  // A .gpx dropped anywhere on the page opens like an imported one.
+  dropGPX(e) {
+    const file = [...(e.dataTransfer?.files ?? [])].find(f => /\.gpx$/i.test(f.name));
+    if (!file) return;
+    e.preventDefault();
+    this.importGPX(file);
+  }
+
   firstUpdated() {
+    this.lastInput = 0;
+    this.donateSynced = 0;
+    for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel']) {
+      window.addEventListener(type, () => (this.lastInput = Date.now()), { passive: true });
+    }
+    setInterval(() => this.countActiveTime(), ACTIVE_TICK_S * 1000);
+    this.addEventListener('dragover', e => e.dataTransfer?.types.includes('Files') && e.preventDefault());
+    this.addEventListener('drop', e => this.dropGPX(e));
     this.map = new RouteMap(this.querySelector('.map'), {
       add: p => this.addStop(p, this.route.stops.length),
       insert: (leg, p) => this.addStop(p, leg + 1 - this.offset),
       move: (i, p) => this.relocateStop(i, p),
-      select: i => this.select(i),
+      select: i => this.pinClicked(i),
       remove: i => this.removeStop(i),
-      copy: p => this.copy(`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`, t('Coordinates copied')),
+      copy: p => this.copy(`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`),
       neighbours: i => this.neighbours(i),
       preview: (points, signal) => this.api.plan({ points: points.map(p => [p.lat, p.lng]), avoid: this.route.avoid ?? {}, legs: null }, signal),
     });
@@ -232,7 +255,7 @@ export class ApexApp extends LitElement {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...this.route, dirty: this.dirty }));
     } catch {}
-    this.map.setStops(this.route.stops, this.selected);
+    this.map.setStops(this.route.stops, this.selected, this.closesLoop());
     // The address is always a link to the route on screen, ready to copy and pass on.
     const address = this.route.stops.length ? toRouteLink(this.route, '') : '/';
     const step = history.state?.step ?? 0;
@@ -334,11 +357,13 @@ export class ApexApp extends LitElement {
   }
 
   update(changed) {
-    if (changed.has('selected') && this.map) this.map.setStops(this.route.stops, this.selected);
+    if (changed.has('selected') && this.map) this.map.setStops(this.route.stops, this.selected, this.closesLoop());
     super.update(changed);
   }
 
   setStops(stops, options) {
+    const atStops = this.account.donate?.atStops;
+    if (atStops && this.route.stops.length < atStops && stops.length >= atStops) this.askDonate();
     this.route = { ...this.route, stops };
     this.changed(options);
   }
@@ -398,6 +423,18 @@ export class ApexApp extends LitElement {
       this.route = { ...this.route, stops: this.route.stops.map(s => (s === stop ? { ...s, ...label } : s)) };
       this.changed({ edited: this.dirty, record: false });
     } catch {}
+  }
+
+  closesLoop() {
+    const { stops, roundTrip, fromHere } = this.route;
+    return stops.length > 1 && !roundTrip && !fromHere;
+  }
+
+  // On the map, clicking the first pin of an open route closes the loop, as when drawing a shape.
+  pinClicked(i) {
+    if (i > 0 || !this.closesLoop()) return this.select(i);
+    this.setOption('roundTrip', true);
+    this.flash(t('Back to the start'));
   }
 
   select(i) {
@@ -701,6 +738,7 @@ export class ApexApp extends LitElement {
     }
     if (!this.account.user) return this.loadLocalLists();
     this.loadSaved();
+    this.loadDonateState();
     await this.adoptLocalLists();
     this.loadLists();
   }
@@ -802,20 +840,38 @@ export class ApexApp extends LitElement {
     }
   }
 
-  async copy(text, done) {
+  // key names the button that shows the text was copied.
+  async copy(text, key) {
     try {
       await navigator.clipboard.writeText(text);
-      this.flash(done);
     } catch {
       // The clipboard API needs a secure origin; plain http over Tailscale is not one.
       prompt(t('Copy the link'), text);
     }
+    if (key) {
+      this.copied = key;
+      clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => (this.copied = null), 1500);
+    }
   }
 
-  async shareRouteLink(url) {
-    try {
-      await navigator.share({ title: this.route.name || t('Apex route'), url });
-    } catch {}
+
+
+
+
+  // share hands the Apex link to the system's share sheet; a browser without one copies it.
+  async share() {
+    const url = toRouteLink(this.route, location.origin);
+    if ('share' in navigator) {
+      try {
+        await navigator.share({ title: this.route.name || t('Apex route'), url });
+      } catch {
+        return;
+      }
+    } else {
+      await this.copy(url, 'apex');
+    }
+    this.askDonate();
   }
 
   // openLinked opens a route read from a route link as an unsaved copy.
@@ -830,27 +886,84 @@ export class ApexApp extends LitElement {
     this.flash(t('Route opened from a link. Save it to keep your own copy.'));
   }
 
-  renderShare(link) {
-    const apex = toRouteLink(this.route, location.origin);
-    return html`
-      <div class="popover share-popover">
-        <div class="share-row">
-          <span class="share-label"><b>${t('Link to this route')}</b><small>${apex.replace(/^https?:\/\//, '')}</small></span>
-          <button class="btn" ?disabled=${!this.route.stops.length} @click=${() => this.copy(apex, t('{what} copied', { what: t('Link') }))}>${t('Copy')}</button>
-          ${'share' in navigator ? html`<button class="btn" ?disabled=${!this.route.stops.length} @click=${() => this.shareRouteLink(apex)}>${t('Share')}</button>` : nothing}
-        </div>
-        <div class="share-row">
-          <span class="share-label"><b>${t('Google Maps link')}</b><small>${t('To navigate with the phone')}</small></span>
-          <button class="btn" ?disabled=${!link} @click=${() => this.copy(link, t('{what} copied', { what: t('Google Maps link') }))}>${t('Copy')}</button>
-        </div>
-        <div class="share-row">
-          <span class="share-label"><b>${t('GPX file')}</b><small>${t('For a GPS or another app')}</small></span>
-          <button class="btn" ?disabled=${this.route.stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export')}</button>
-          <button class="btn" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import…')}</button>
-        </div>
-      </div>
-    `;
+  // askDonate, at a moment the rider took a route out or drew a long one, invites them to chip in once
+  // they have used Apex long enough (APEX_DONATE). The wait is in active time, so who rides a lot is
+  // asked sooner; each "Not now" doubles it.
+  askDonate() {
+    const donate = this.account.donate;
+    if (!donate) return;
+    const seen = donateSeen();
+    const now = Date.now();
+    if (seen.activeSeconds < (seen.dueSeconds || donate.firstSeconds) || now - seen.shownAt < donate.gapSeconds * 1000) return;
+    this.keepDonate({ ...seen, shownAt: now }, true);
+    const show = () => {
+      this.popover = null;
+      this.donateAsk = true;
+      this.api.donateEvent('shown');
+    };
+    // Opening Google Maps hides this tab; the invitation waits for the rider to come back.
+    setTimeout(() => {
+      if (!document.hidden) return show();
+      document.addEventListener('visibilitychange', function back() {
+        if (document.hidden) return;
+        document.removeEventListener('visibilitychange', back);
+        setTimeout(show, 600);
+      });
+    }, 1200);
   }
+
+  countActiveTime() {
+    if (!this.account.donate || document.hidden || Date.now() - this.lastInput > IDLE_MS) return;
+    const seen = donateSeen();
+    this.keepDonate({ ...seen, activeSeconds: seen.activeSeconds + ACTIVE_TICK_S }, Date.now() - this.donateSynced > 60e3);
+  }
+
+  // keepDonate stores the donation state in this browser and, for a signed-in rider, on the server
+  // too, so a new browser or a cleared one does not start from zero.
+  keepDonate(seen, sync) {
+    writeJSON(DONATE_KEY, seen);
+    if (!sync || !this.account.user) return;
+    this.donateSynced = Date.now();
+    this.api.saveDonateState(seen).then(merged => writeJSON(DONATE_KEY, furthest(donateSeen(), merged)), () => {});
+  }
+
+  async loadDonateState() {
+    if (!this.account.donate) return;
+    try {
+      this.keepDonate(furthest(donateSeen(), await this.api.donateState()), true);
+    } catch {}
+  }
+
+  renderDonateAsk() {
+    const close = event => {
+      this.donateAsk = false;
+      this.api.donateEvent(event);
+      const donate = this.account.donate;
+      const seen = donateSeen();
+      if (event === 'clicked') {
+        this.keepDonate({ ...seen, declined: 0, dueSeconds: seen.activeSeconds + donate.thanksSeconds }, true);
+      } else {
+        const declined = seen.declined + 1;
+        const wait = Math.min(donate.laterSeconds * 2 ** (declined - 1), donate.mostSeconds);
+        this.keepDonate({ ...seen, declined, dueSeconds: seen.activeSeconds + wait }, true);
+      }
+    };
+    return html`
+      <div class="tour" role="dialog" aria-modal="true" aria-labelledby="donate-title" @keydown=${e => e.key === 'Escape' && close('dismissed')}>
+        <div class="tour-shade" @click=${() => close('dismissed')}></div>
+        <div class="tour-bubble donate-dialog">
+          <div class="donate-mark" aria-hidden="true">⛽</div>
+          <h2 id="donate-title">${t('Has Apex been useful?')}</h2>
+          <p>${t('Apex is free and has no ads. If it found you a good road, you can buy me some fuel.')}</p>
+          <div class="tour-buttons">
+            <button class="tour-skip" @click=${() => close('dismissed')}>${t('Not now')}</button>
+            <a class="btn primary" href=${this.account.donate.url} target="_blank" rel="noopener" @click=${() => close('clicked')}>${t('Buy me some fuel')}</a>
+          </div>
+        </div>
+      </div>`;
+  }
+
+
 
   flash(text) {
     this.notice = { text };
@@ -899,6 +1012,13 @@ export class ApexApp extends LitElement {
           <button class="icon popover-toggle gear" title=${t('Avoid motorways, tolls or ferries')} aria-label=${t('Avoid')} aria-expanded=${this.popover === 'options'}
             @click=${() => this.togglePopover('options')}>${GEAR_ICON}</button>
           ${this.popover === 'options' ? this.renderRouteOptions() : nothing}
+          <button class="icon popover-toggle gpx" title=${t('GPX file')} aria-label=${t('GPX file')} aria-haspopup="menu" aria-expanded=${this.popover === 'gpx'}
+            @click=${() => this.togglePopover('gpx')}>${GPX_ICON}</button>
+          ${this.popover === 'gpx' ? html`
+            <div class="popover gpx-menu" role="menu">
+              <button role="menuitem" ?disabled=${stops.length === 0} @click=${() => ((this.popover = null), this.exportGPX())}>${t('Export GPX')}</button>
+              <button role="menuitem" @click=${() => ((this.popover = null), this.querySelector('input.gpx-file').click())}>${t('Import GPX…')}</button>
+            </div>` : nothing}
           </div>
           ${this.renderCurves()}
           ${this.activeOptions().length
@@ -927,16 +1047,16 @@ export class ApexApp extends LitElement {
           ${this.renderSaved()}
         </div>
         <div class="actions">
-          <a class="btn primary" href=${link ?? '#'} target="_blank" rel="noopener" aria-disabled=${!link}>
+          <a class="btn primary" href=${link ?? '#'} target="_blank" rel="noopener" aria-disabled=${!link} @click=${() => link && this.askDonate()}>
             ${t(this.advanced && this.planning ? 'Working out the route…' : 'Open in Google Maps')}
           </a>
-          <button class="btn square popover-toggle" title=${t('Share')} aria-label=${t('Share')} aria-expanded=${this.popover === 'share'}
-            @click=${() => this.togglePopover('share')}>${SHARE_ICON}</button>
-          ${this.popover === 'share' ? this.renderShare(link) : nothing}
+          <button class="btn square share" title=${t(this.copied === 'apex' ? 'Link copied' : 'Share')} aria-label=${t('Share')}
+            ?disabled=${stops.length === 0} @click=${() => this.share()}>${this.copied === 'apex' ? CHECK_ICON : SHARE_ICON}</button>
         </div>
       </aside>
       ${this.map ? this.renderLayers() : nothing}
       ${this.map ? this.renderBasemap() : nothing}
+      ${this.donateAsk ? this.renderDonateAsk() : nothing}
       ${this.tour ? renderTour(this.tour.step, this.tour.rect, {
         next: () => this.tourTo(this.tour.step + 1),
         back: () => this.tourTo(this.tour.step - 1),
@@ -1279,6 +1399,7 @@ export class ApexApp extends LitElement {
               ${user.name ? html`<b>${user.name}</b>` : nothing}
               <span>${user.email}</span>
             </div>
+            <a role="menuitem" href="/privacy" target="_blank" rel="noopener">${t('Privacy')}</a>
             <button role="menuitem" @click=${() => ((this.popover = null), this.signOut())}>${t('Sign out')}</button>
           </div>` : nothing}
       </span>`;
@@ -1362,6 +1483,15 @@ function loadDraft() {
 }
 
 customElements.define('apex-app', ApexApp);
+
+function donateSeen() {
+  return { activeSeconds: 0, dueSeconds: 0, shownAt: 0, declined: 0, ...readJSON(DONATE_KEY) };
+}
+
+// furthest keeps the larger of each count, as the server does, so neither copy winds the other back.
+function furthest(a, b) {
+  return Object.fromEntries(Object.keys(a).map(k => [k, Math.max(a[k] ?? 0, b?.[k] ?? 0)]));
+}
 
 function readJSON(key) {
   try {

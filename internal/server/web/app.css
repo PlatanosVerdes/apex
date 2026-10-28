@@ -33,6 +33,10 @@ apex-app { display: block; position: fixed; inset: 0; }
 /* Leaflet marks a pan on <body>, so the hand covers everything on the map until it is let go. */
 body.leaflet-dragging .map, body.leaflet-dragging .map * { cursor: grabbing !important; }
 .leaflet-marker-icon.stop-pin { cursor: move; }
+.leaflet-marker-icon.stop-pin.closes {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='12' fill='%23ffffff' stroke='%230d0d0f' stroke-width='1.5'/%3E%3Cg fill='none' stroke='%230d0d0f' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 14a6 6 0 1 1-1.76-4.24'/%3E%3Cpath d='M18.5 6.5v3.5H15'/%3E%3C/g%3E%3C/svg%3E") 14 14, pointer;
+}
+.stop-pin.closes:hover { box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 35%, transparent), 0 1px 4px rgb(0 0 0 / .35); }
 .leaflet-interactive.leg { stroke: var(--route); stroke-opacity: .8; cursor: copy; }
 .leaflet-interactive.leg:hover { stroke-opacity: 1; stroke-width: 9; }
 .leaflet-interactive.leg.curvy { stroke: var(--curvy); }
@@ -108,8 +112,12 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .totals b { color: var(--ink); }
 .summary { position: relative; display: flex; align-items: flex-start; gap: 8px; }
 .summary .totals { flex: 1; }
-.gear { margin-top: -4px; }
-.gear[aria-expanded="true"] { color: var(--accent); }
+.gear, .summary .gpx { margin-top: -4px; }
+.gear[aria-expanded="true"], .summary .gpx[aria-expanded="true"] { color: var(--accent); }
+.gpx-menu { top: 28px; right: 0; width: 170px; padding: 4px; display: flex; flex-direction: column; font-size: 14px; }
+.gpx-menu button { padding: 8px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.gpx-menu button:hover { background: var(--soft); }
+.gpx-menu button:disabled { color: var(--muted); cursor: default; background: none; }
 .popover {
   position: absolute; z-index: 1100; background: var(--card); color: var(--ink); border-radius: 12px;
   border: 1px solid var(--line); box-shadow: 0 10px 30px rgb(0 0 0 / .25);
@@ -436,13 +444,10 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .insert-here.on { background: var(--ink); color: var(--card); }
 
 .actions { position: relative; }
-.share-popover { bottom: calc(100% + 6px); right: 12px; width: min(340px, calc(100% - 24px)); padding: 6px; display: flex; flex-direction: column; }
-.share-row { display: flex; align-items: center; gap: 8px; padding: 8px; }
-.share-row + .share-row { border-top: 1px solid var(--line); }
-.share-label { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.share-label b { font-size: 14px; }
-.share-label small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.share-row .btn { flex: none; padding: 6px 12px; font-size: 13px; }
+.donate-dialog { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: min(320px, calc(100vw - 32px)); text-align: center; }
+.donate-dialog .tour-buttons { justify-content: center; }
+.donate-dialog .tour-skip { margin-right: 0; }
+.donate-mark { font-size: 32px; line-height: 1; margin-bottom: 8px; }
 .hint .link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; }
 
 .quota { padding: 0 8px 8px; margin-top: -4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -467,6 +472,10 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .account-menu .who span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-menu button { font: inherit; text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; }
 .account-menu button:hover { background: var(--soft); }
+.account-menu a { padding: 7px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+.account-menu a:hover { background: var(--soft); }
+.tour-privacy { display: block; margin: -6px 0 12px; font-size: 12px; color: var(--muted); text-decoration: none; }
+.tour-privacy:hover { color: var(--ink); text-decoration: underline; }
 .account-menu .menu-note { border-top: 0; margin-top: 0; }
 
 .panel header input { text-overflow: ellipsis; }

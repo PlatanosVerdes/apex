@@ -17,7 +17,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		User   *auth.User `json:"user"`
 		SignIn string     `json:"signIn,omitempty"`
-	}{}
+		Donate *Donate    `json:"donate,omitempty"`
+	}{Donate: s.Donate}
 	if u, ok := s.Sessions.Read(r); ok {
 		out.User = &u
 	}

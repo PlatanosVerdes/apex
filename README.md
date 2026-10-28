@@ -87,5 +87,6 @@ go run ./cmd/apex
 | `APEX_CURVE_SEARCHES`, `APEX_CURVE_REFILL` | `20`, `30s` | each rider's curve-search budget |
 | `APEX_PUBLIC_REQUESTS`, `APEX_PUBLIC_REFILL` | `120`, `500ms` | each address's budget on the open endpoints |
 | `APEX_LISTS_EVERY` | `3h` | how often linked lists are read again |
+| `APEX_DONATE` | | the invitation to chip in, e.g. `url=https://ko-fi.com/… first=1h later=2h most=32h thanks=10h gap=24h stops=10`; empty never asks. Waits are active time (page in view, someone using it): `first` before the first ask, `later` after a "Not now" (doubled each time up to `most`), `thanks` after following the link; `gap` is the least wall-clock time between asks; `stops` makes reaching that many stops a moment to ask |
 | `APEX_METRICS_ADDR` | | where `/metrics` is served for Prometheus, e.g. `:9100`; never the public address |
 | `APEX_VALHALLA_URL`, `APEX_NOMINATIM_URL`, `APEX_PHOTON_URL` | public servers | |

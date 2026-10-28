@@ -74,7 +74,7 @@ export class RouteMap {
     this.map.on('contextmenu', e =>
       this.menu(e.latlng, [
         [t('Add a stop here'), () => this.handlers.add(point(e.latlng))],
-        [t('Copy coordinates'), () => this.handlers.copy(point(e.latlng))],
+        [t('Copy coordinates'), () => this.handlers.copy(point(e.latlng)), `${t('Copied')} ✓`],
       ]),
     );
   }
@@ -84,25 +84,34 @@ export class RouteMap {
     const list = document.createElement('div');
     list.className = 'map-menu';
     const popup = L.popup({ closeButton: false, className: 'map-menu-popup', offset: [0, -8] });
-    for (const [label, run] of items) {
+    // An item with a third label shows it for a moment after running, before the menu closes.
+    for (const [label, run, done] of items) {
       const button = document.createElement('button');
       button.textContent = label;
-      button.addEventListener('click', () => (this.map.closePopup(popup), run()));
+      button.addEventListener('click', async () => {
+        if (!done) return (this.map.closePopup(popup), run());
+        await run();
+        button.textContent = done;
+        button.classList.add('done');
+        setTimeout(() => this.map.closePopup(popup), 900);
+      });
       list.append(button);
     }
     popup.on('remove', () => (this.menuClosed = Date.now()));
     popup.setLatLng(latlng).setContent(list).openOn(this.map);
   }
 
-  setStops(stops, selected) {
+  // closes marks the first pin as the one that turns the route into a loop when clicked.
+  setStops(stops, selected, closes) {
     this.pins.clearLayers();
     this.markers = stops.map((s, i) => {
-      const classes = ['stop-pin', i === 0 && 'first', i === stops.length - 1 && i > 0 && 'last', i === selected && 'selected'];
+      const classes = ['stop-pin', i === 0 && 'first', i === 0 && closes && 'closes', i === stops.length - 1 && i > 0 && 'last', i === selected && 'selected'];
       const marker = L.marker([s.lat, s.lng], {
         draggable: true,
         autoPan: true,
         // Above the places from the linked lists, which share the marker pane.
         zIndexOffset: 1000,
+        title: i === 0 && closes ? t('Return to the start') : '',
         icon: L.divIcon({ className: classes.filter(Boolean).join(' '), html: String(i + 1), iconSize: [26, 26] }),
       });
       // While a stop is dragged, the legs either side of it are redrawn along the roads as it moves.
@@ -125,7 +134,7 @@ export class RouteMap {
         L.DomEvent.stop(e);
         this.menu(marker.getLatLng(), [
           [t('Remove'), () => this.handlers.remove(i)],
-          [t('Copy coordinates'), () => this.handlers.copy(s)],
+          [t('Copy coordinates'), () => this.handlers.copy(s), `${t('Copied')} ✓`],
         ]);
       });
       return marker.addTo(this.pins);

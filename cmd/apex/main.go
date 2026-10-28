@@ -67,6 +67,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	donate, err := server.ParseDonate(os.Getenv("APEX_DONATE"))
+	if err != nil {
+		return err
+	}
+
 	var google *auth.Google
 	if clientID != "" {
 		if publicURL == "" {
@@ -93,6 +98,7 @@ func run() error {
 		Metrics: reg,
 		Version: buildVersion,
 		Log:     log,
+		Donate:  donate,
 	}
 	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 

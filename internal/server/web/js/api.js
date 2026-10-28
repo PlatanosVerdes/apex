@@ -74,6 +74,23 @@ export class Api {
     return this.request(`api/lists/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  donateState() {
+    return this.request('api/donate/state');
+  }
+
+  saveDonateState(state) {
+    return this.request('api/donate/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    });
+  }
+
+  // donateEvent counts what riders do with the invitation to chip in; it is fire and forget.
+  donateEvent(event) {
+    fetch('api/donate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event }), keepalive: true }).catch(() => {});
+  }
+
   remove(id) {
     return this.request(`api/routes/${id}`, { method: 'DELETE' });
   }

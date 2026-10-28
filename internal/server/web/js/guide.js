@@ -57,6 +57,7 @@ export function renderTour(step, rect, { next, back, close }) {
         <div class="tour-count">${step + 1} / ${STEPS.length}</div>
         <h2 id="tour-title">${t(s.title)}</h2>
         <p>${t(s.text)}</p>
+        ${last ? html`<a class="tour-privacy" href="/privacy" target="_blank" rel="noopener">${t('Privacy')}</a>` : nothing}
         <div class="tour-buttons">
           <button class="tour-skip" @click=${close}>${t(last ? 'Close' : 'Skip')}</button>
           ${step > 0 && !last ? html`<button class="btn" @click=${back}>${t('Back')}</button>` : nothing}
