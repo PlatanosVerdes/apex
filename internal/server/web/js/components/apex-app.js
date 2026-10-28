@@ -348,6 +348,9 @@ export class ApexApp extends LitElement {
   renderCurves() {
     const c = this.curves;
     if (!this.advanced || !c) return nothing;
+    // The budget only matters to a route that has a curvy or twisty leg to search.
+    const { points, legs } = this.planRequest();
+    if (points.length < 2 || !legs?.some(l => l.style !== 'fast')) return nothing;
     // Out of searches says nothing here: the beating line and "Fast for now" on the leg do.
     if (c.left >= c.max || this.quotaLevel() === 'out') return nothing;
     const level = this.quotaLevel();
