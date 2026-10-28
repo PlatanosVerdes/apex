@@ -293,6 +293,19 @@ func TestListsAPI(t *testing.T) {
 	}
 }
 
+func TestReadListSignedOut(t *testing.T) {
+	srv, _ := newServer(t)
+	resp := do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/lists/read", `{"url":"https://maps.app.goo.gl/list"}`)
+	var l store.LinkedList
+	_ = json.NewDecoder(resp.Body).Decode(&l)
+	if resp.StatusCode != 200 || l.Name != "Ruta moto" || l.URL != "https://maps.app.goo.gl/list" || len(l.Places) != 1 {
+		t.Fatalf("%d %+v", resp.StatusCode, l)
+	}
+	if resp := do(t, http.DefaultClient, http.MethodPost, srv.URL+"/api/lists/read", `{"url":"https://example.com/x"}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a link that is not a list: %d", resp.StatusCode)
+	}
+}
+
 func TestSearchAPI(t *testing.T) {
 	srv, _ := newServer(t)
 	resp, _ := http.Get(srv.URL + "/api/search?q=Sa%20Calobra&near=39.8,2.8")

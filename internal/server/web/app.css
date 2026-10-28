@@ -335,13 +335,6 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .stops .leg.curvy .line::before { background: var(--curvy); }
 .stops .leg.twisty .line::before { background: var(--twisty); }
 
-.more { position: relative; flex: none; }
-.more-menu { top: 32px; right: 0; width: 170px; padding: 4px; display: flex; flex-direction: column; font-size: 14px; }
-.more-menu button {
-  font: inherit; text-align: left; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer;
-}
-.more-menu button:hover { background: var(--soft); }
-.more-menu button:disabled { color: var(--muted); cursor: default; background: none; }
 
 .basemap {
   position: absolute; z-index: 1000; left: 384px; bottom: 28px; padding: 0; border: 0; background: none; cursor: pointer; font: inherit;
@@ -450,6 +443,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .share-label b { font-size: 14px; }
 .share-label small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .share-row .btn { flex: none; padding: 6px 12px; font-size: 13px; }
+.hint .link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; }
 
 .quota { padding: 0 8px 8px; margin-top: -4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .quota::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--curvy); vertical-align: middle; }
@@ -460,7 +454,6 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .menu-note { padding: 8px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-note b { color: var(--ink); font-weight: 600; }
 .places-popover .signin-btn { width: 100%; margin-top: 8px; }
-.more-menu { width: 230px; }
 
 .account { position: relative; flex: none; }
 .avatar {
@@ -477,7 +470,7 @@ path.here { fill: var(--route); fill-opacity: 1; stroke: #fff; stroke-width: 3; 
 .account-menu .menu-note { border-top: 0; margin-top: 0; }
 
 .panel header input { text-overflow: ellipsis; }
-.panel header .save, .panel header .saved-mark { display: grid; place-items: center; }
+.panel header .save, .panel header .saved-mark, .panel header .new, .panel header .help { display: grid; place-items: center; }
 .panel header .save { color: var(--ink); }
 .panel header .saved-mark { color: var(--muted); cursor: default; }
 .panel header .save:disabled { visibility: visible; opacity: .45; cursor: default; background: none; }
