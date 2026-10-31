@@ -25,6 +25,10 @@ import (
 	"github.com/PlatanosVerdes/apex/internal/valhalla"
 )
 
+// iOS ignores SVG icons on the home screen, so it gets a PNG of icon.svg, its background squared
+// because iOS rounds the corners itself.
+//
+//go:generate sh -c "echo 'svg > rect:first-of-type { rx: 0; ry: 0 }' | rsvg-convert --width 180 --height 180 --stylesheet /dev/stdin web/icon.svg -o web/apple-touch-icon.png"
 //go:embed web
 var web embed.FS
 
@@ -158,10 +162,6 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /privacy", func(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r, "privacy.html", files["privacy.html"])
-	})
-	mux.HandleFunc("GET /apple-touch-icon.png", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		http.ServeFile(w, r, touchIconPath)
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok "+s.Version+"\n")

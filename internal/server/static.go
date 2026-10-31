@@ -12,9 +12,6 @@ import (
 	"strings"
 )
 
-// The PNG the Dockerfile renders from web/icon.svg, since iOS ignores SVG icons on the home screen.
-const touchIconPath = "/usr/local/share/apex/apple-touch-icon.png"
-
 type asset struct {
 	body, gzipped []byte
 	etag, ctype   string
