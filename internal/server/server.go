@@ -159,6 +159,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /privacy", func(w http.ResponseWriter, r *http.Request) {
 		serveAsset(w, r, "privacy.html", files["privacy.html"])
 	})
+	mux.HandleFunc("GET /apple-touch-icon.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeFile(w, r, touchIconPath)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok "+s.Version+"\n")
 	})
