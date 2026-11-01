@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,14 +49,21 @@ type Route struct {
 	Has Avoid `json:"has"`
 }
 
+const (
+	// The public server allows one call per second per client; every apex user is the same client.
+	callEvery = 1100 * time.Millisecond
+	// A call answered in a fraction of a second when the server was well; one that hung did not answer
+	// in 30 s, so waiting longer than this only delays the retry.
+	callTimeout = 10 * time.Second
+	slowCall    = 2 * time.Second
+)
+
 type Client struct {
 	base      string
 	userAgent string
 	http      *http.Client
-	// slots bound the calls in flight, since the public server answers 429 to a burst. Searches
-	// have a lane of their own, so a fast leg never queues behind a curve search's many calls.
-	slots, searchSlots chan struct{}
-	// retryWait is the first pause after a 429; it doubles on each retry.
+	pace      *pacer
+	// retryWait is the first pause after a 429 without Retry-After; it doubles on each retry.
 	retryWait time.Duration
 
 	mu    sync.Mutex
@@ -64,11 +73,60 @@ type Client struct {
 func New(base, userAgent string) *Client {
 	return &Client{
 		base: strings.TrimRight(base, "/"), userAgent: userAgent,
-		http:        &http.Client{Timeout: 30 * time.Second},
-		cache:       map[string]Route{},
-		slots:       make(chan struct{}, 2),
-		searchSlots: make(chan struct{}, 2),
-		retryWait:   500 * time.Millisecond,
+		http:      &http.Client{Timeout: callTimeout},
+		cache:     map[string]Route{},
+		pace:      &pacer{every: callEvery},
+		retryWait: 2 * time.Second,
+	}
+}
+
+// pacer lets one call start every so often across the whole process, so the server never sees a
+// burst. A fast call goes before any search call waiting, so a leg never queues behind a search.
+type pacer struct {
+	mu          sync.Mutex
+	every       time.Duration
+	next        time.Time // the earliest the next call may start
+	fastWaiting int
+}
+
+func (p *pacer) turn(ctx context.Context, search bool) error {
+	if !search {
+		p.mu.Lock()
+		p.fastWaiting++
+		p.mu.Unlock()
+		defer func() {
+			p.mu.Lock()
+			p.fastWaiting--
+			p.mu.Unlock()
+		}()
+	}
+	for {
+		p.mu.Lock()
+		now := time.Now()
+		wait := p.next.Sub(now)
+		if wait <= 0 && (!search || p.fastWaiting == 0) {
+			p.next = now.Add(p.every)
+			p.mu.Unlock()
+			return nil
+		}
+		if wait <= 0 {
+			wait = 10 * time.Millisecond // a fast call is waiting for this turn
+		}
+		p.mu.Unlock()
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// hold keeps every call back for d, as the server asked after a 429.
+func (p *pacer) hold(d time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if until := time.Now().Add(d); until.After(p.next) {
+		p.next = until
 	}
 }
 
@@ -201,46 +259,60 @@ func (c *Client) request(ctx context.Context, pts []Point, o Options) (Route, er
 	return out, nil
 }
 
-// post sends a request through the slots and, when the server says it is too busy (429), waits and
-// tries again, three times at most.
 type searchKey struct{}
 
-// Searching marks ctx as part of a search that asks many times, so its calls take the search lane.
+// Searching marks ctx as part of a search that asks many times, so its calls give way to fast ones.
 func Searching(ctx context.Context) context.Context {
 	return context.WithValue(ctx, searchKey{}, true)
 }
 
+// post sends a request in its turn. A 429 holds every call for as long as the server asks, three
+// times at most; a call that timed out or failed on the server's side is tried once more.
 func (c *Client) post(ctx context.Context, body []byte) (*http.Response, error) {
-	slots := c.slots
-	if ctx.Value(searchKey{}) != nil {
-		slots = c.searchSlots
-	}
+	search := ctx.Value(searchKey{}) != nil
 	wait := c.retryWait
+	retried := false
 	for attempt := 0; ; attempt++ {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		if err := c.pace.turn(ctx, search); err != nil {
+			return nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/route", bytes.NewReader(body))
 		if err != nil {
-			<-slots
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", c.userAgent)
+		req.Header.Set("X-Client-Id", "apex")
+		start := time.Now()
 		resp, err := c.http.Do(req)
-		<-slots
-		if err != nil || resp.StatusCode != http.StatusTooManyRequests || attempt == 3 {
+		took := time.Since(start)
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		// A search that closes off roads is often answered "no route" (400): that is its answer, not a fault.
+		if err != nil || took > slowCall || status >= 400 && !(search && status == http.StatusBadRequest) {
+			slog.Warn("valhalla call", "took_ms", took.Milliseconds(), "status", status, "search", search, "attempt", attempt+1, "err", err)
+		}
+		switch {
+		case ctx.Err() != nil:
+			return resp, err
+		case status == http.StatusTooManyRequests && attempt < 3:
+			resp.Body.Close()
+			hold := wait
+			if s, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && s > 0 {
+				hold = time.Duration(s) * time.Second
+			}
+			c.pace.hold(hold)
+			wait *= 2
+		case (err != nil || status >= 500) && !retried:
+			if resp != nil {
+				resp.Body.Close()
+			}
+			retried = true
+		default:
 			return resp, err
 		}
-		resp.Body.Close()
-		select {
-		case <-time.After(wait):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		wait *= 2
 	}
 }
 

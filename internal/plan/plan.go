@@ -154,6 +154,11 @@ func (p *Planner) cachedLeg(ctx context.Context, a, b valhalla.Point, o LegOptio
 			r, err = p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: own})
 		default:
 			r, err = p.curviest(valhalla.Searching(ctx), a, b, own, slack[o.Style])
+			if err != nil && ctx.Err() == nil {
+				// The server did not answer the search: drawn fast for now and owed, as a refused one.
+				limited = true
+				r, err = p.Router.Route(ctx, []valhalla.Point{a, b}, valhalla.Options{Avoid: own})
+			}
 		}
 		if err != nil {
 			return Leg{}, valhalla.Avoid{}, err
