@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -71,10 +72,13 @@ func TestOffRoute(t *testing.T) {
 type fakeRouter struct {
 	detourSeconds float64
 	calls         atomic.Int32
+	failFirst     int32 // calls that fail as a server that does not answer
 }
 
 func (f *fakeRouter) Route(_ context.Context, pts []valhalla.Point, o valhalla.Options) (valhalla.Route, error) {
-	f.calls.Add(1)
+	if f.calls.Add(1) <= f.failFirst {
+		return valhalla.Route{}, errors.New("valhalla: context deadline exceeded")
+	}
 	var r valhalla.Route
 	for i := 1; i < len(pts); i++ {
 		a, b := latLng{pts[i-1].Lat, pts[i-1].Lng}, latLng{pts[i].Lat, pts[i].Lng}
@@ -191,6 +195,17 @@ func TestOutOfCurveSearches(t *testing.T) {
 	}
 	if spent != 1 || p.Legs[0].Limited {
 		t.Errorf("the same leg twice must spend one search, spent %d", spent)
+	}
+}
+
+func TestACurveSearchTheServerDropsIsDrawnFastAndOwed(t *testing.T) {
+	f := &fakeRouter{detourSeconds: meters(latLng{palma.Lat, palma.Lng}, latLng{soller.Lat, soller.Lng}) / 25 * 1.3, failFirst: 1}
+	p, err := (&Planner{Router: f}).Plan(context.Background(), []valhalla.Point{palma, soller}, []LegOptions{{Style: Curvy}}, valhalla.Avoid{}, nil)
+	if err != nil {
+		t.Fatalf("the plan failed instead of drawing the leg fast: %v", err)
+	}
+	if !p.Legs[0].Limited {
+		t.Error("a leg drawn fast because the search failed is not marked to be redone")
 	}
 }
 

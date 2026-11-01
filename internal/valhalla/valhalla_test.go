@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,28 +80,36 @@ func TestRouteError(t *testing.T) {
 	}
 }
 
-func TestRetriesWhenBusyAndBoundsCalls(t *testing.T) {
-	var calls, inFlight, most atomic.Int32
+const okTrip = `{"trip":{"summary":{"length":1,"time":60},"legs":[{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"}]}}`
+
+// quick is a client against srv whose pacing and back-off are short enough for a test.
+func quick(srv *httptest.Server, every time.Duration) *Client {
+	c := New(srv.URL, "test")
+	c.pace.every, c.retryWait = every, time.Millisecond
+	return c
+}
+
+func TestCallsStartOneAtATimeAndRetryWhenBusy(t *testing.T) {
+	var mu sync.Mutex
+	var starts []time.Time
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := inFlight.Add(1)
-		defer inFlight.Add(-1)
-		for {
-			m := most.Load()
-			if n <= m || most.CompareAndSwap(m, n) {
-				break
-			}
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		if r.Header.Get("X-Client-Id") != "apex" {
+			t.Error("a call went out without its client id")
 		}
-		time.Sleep(20 * time.Millisecond)
 		if calls.Add(1)%3 == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte("<html>busy</html>"))
 			return
 		}
-		_, _ = w.Write([]byte(`{"trip":{"summary":{"length":1,"time":60},"legs":[{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"}]}}`))
+		_, _ = w.Write([]byte(okTrip))
 	}))
 	defer srv.Close()
-	c := New(srv.URL, "test")
-	c.retryWait = time.Millisecond
+	every := 30 * time.Millisecond
+	c := quick(srv, every)
 	var wg sync.WaitGroup
 	errs := make([]error, 6)
 	for i := range 6 {
@@ -118,21 +125,20 @@ func TestRetriesWhenBusyAndBoundsCalls(t *testing.T) {
 			t.Errorf("route %d: %v", i, err)
 		}
 	}
-	if most.Load() > 2 {
-		t.Errorf("%d calls in flight at once, the cap is 2", most.Load())
+	for i := 1; i < len(starts); i++ {
+		if gap := starts[i].Sub(starts[i-1]); gap < every-5*time.Millisecond {
+			t.Errorf("calls %d and %d started %v apart, want at least %v", i, i+1, gap, every)
+		}
 	}
 }
 
 func TestFastCallsSkipTheSearchQueue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		if strings.Contains(string(body), "exclude_polygons") {
-			time.Sleep(300 * time.Millisecond)
-		}
-		_, _ = w.Write([]byte(`{"trip":{"summary":{"length":1,"time":60},"legs":[{"summary":{"length":1,"time":60},"shape":"_p~iF~ps|U"}]}}`))
+		_, _ = w.Write([]byte(okTrip))
 	}))
 	defer srv.Close()
-	c := New(srv.URL, "test")
+	every := 50 * time.Millisecond
+	c := quick(srv, every)
 	search := Searching(context.Background())
 	closed := [][]Point{{{Lat: 39.1, Lng: 2}, {Lat: 39.2, Lng: 2}, {Lat: 39.2, Lng: 2.1}}}
 	for i := range 4 {
@@ -140,12 +146,55 @@ func TestFastCallsSkipTheSearchQueue(t *testing.T) {
 			_, _ = c.Route(search, []Point{{Lat: 39 + float64(i)/100, Lng: 2}, {Lat: 39.5, Lng: 2}}, Options{Exclude: closed})
 		}()
 	}
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	start := time.Now()
 	if _, err := c.Route(context.Background(), []Point{{Lat: 40, Lng: 2}, {Lat: 40.5, Lng: 2}}, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 150*time.Millisecond {
+	// Four searches take four turns; the fast call needs at most the one already running.
+	if took := time.Since(start); took > 2*every {
 		t.Errorf("a fast call waited %v behind searches", took)
+	}
+}
+
+func TestABusyServerHoldsEveryCallForItsRetryAfter(t *testing.T) {
+	var calls atomic.Int32
+	var mu sync.Mutex
+	var starts []time.Time
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(okTrip))
+	}))
+	defer srv.Close()
+	c := quick(srv, time.Millisecond)
+	if _, err := c.Route(context.Background(), []Point{{Lat: 39, Lng: 2}, {Lat: 39.5, Lng: 2}}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if gap := starts[1].Sub(starts[0]); gap < 950*time.Millisecond {
+		t.Errorf("retried after %v, the server asked for 1 s", gap)
+	}
+}
+
+func TestAHungCallIsTriedOnceMore(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 2 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		_, _ = w.Write([]byte(okTrip))
+	}))
+	defer srv.Close()
+	c := quick(srv, time.Millisecond)
+	c.http.Timeout = 50 * time.Millisecond
+	_, err := c.Route(context.Background(), []Point{{Lat: 39, Lng: 2}, {Lat: 39.5, Lng: 2}}, Options{})
+	if err == nil || calls.Load() != 2 {
+		t.Errorf("err %v after %d calls, want a failure after one retry", err, calls.Load())
 	}
 }
